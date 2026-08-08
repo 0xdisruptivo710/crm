@@ -1,0 +1,15 @@
+# Dependências e builds
+node_modules/
+dist/
+.next/
+.turbo/
+coverage/
+
+# Segredos — NUNCA commitar
+.env
+.env.*
+!.env.example
+
+# Sistema
+desktop.ini
+.DS_Store
