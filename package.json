@@ -1,0 +1,18 @@
+{
+  "name": "aios-pocket",
+  "private": true,
+  "packageManager": "pnpm@10.4.1",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "turbo run build",
+    "dev": "turbo run dev",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "lint": "eslint .",
+    "test:arch": "vitest run tests/architecture"
+  },
+  "devDependencies": {
+    "turbo": "^2.5.0",
+    "typescript": "^5.7.2"
+  }
+}
