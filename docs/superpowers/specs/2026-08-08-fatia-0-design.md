@@ -37,11 +37,11 @@ Aios Pocket é um Operating System para empresas que vendem e atendem pelo Whats
 
 ### Não entra (fatias seguintes)
 
-Kanban, Agenda, Follow-up, Campanhas, Relatórios, signup/onboarding, gestão de múltiplas companies pela UI, WebSocket próprio, disparos em massa.
+Kanban, Agenda, Follow-up, Campanhas, Relatórios, signup/onboarding, gestão de múltiplas companies pela UI, WebSocket próprio, disparos em massa, exibição de QR code no produto (a conexão da instância é feita no painel do próprio provider nesta entrega; nossa UI só mostra o status) e download de mídia para o Supabase Storage (nesta entrega armazenamos a referência/URL de mídia vinda do provider).
 
 ### Critério de pronto
 
-1. Usuário manda WhatsApp para a instância → mensagem aparece no inbox em tempo real → responde pela UI → resposta chega no celular → Timeline registra tudo (nas **duas** instâncias: Evolution e Z-API, uma por vez — um provider ativo por tenant).
+1. Usuário manda WhatsApp para a instância → mensagem aparece no inbox em tempo real → responde pela UI → resposta chega no celular → Timeline registra tudo (nas **duas** instâncias: Evolution e Z-API, uma por vez — o teste da segunda troca o `active_provider` na config da company piloto; não se cria segundo tenant).
 2. Enforcement mecânico rodando verde no CI.
 3. Mesma suíte de contrato de providers passa na Evolution e na Z-API.
 
@@ -97,7 +97,7 @@ Nenhum código fora de `packages/providers` conhece hosts ou formatos da Evoluti
 1. `POST /webhooks/{evolution|zapi}` identifica a company (token/ID de instância na URL ou header), **arquiva o payload cru em `raw_webhook_events` antes de qualquer parse** e responde 200 imediatamente.
 2. Job BullMQ processa: dedupe → `parseWebhook` → resolve/cria Customer (E.164 + 9º dígito) → resolve/cria Conversation → insere Message (`received`; ou outbound se `fromMe`) → registra TimelineEvent.
 3. `MessageStatusUpdate` move a máquina de estados; cada transição vira TimelineEvent.
-4. `ConnectionStatusChange` gera evento + badge de status da instância na UI. Instância morta nunca falha em silêncio.
+4. `ConnectionStatusChange` gera evento + badge de status da instância na UI (nesta entrega o alerta é badge + TimelineEvent; push/email ficam para fatia futura). Instância morta nunca falha em silêncio.
 
 ### Saída (UI → celular)
 
@@ -116,7 +116,7 @@ Nenhum código fora de `packages/providers` conhece hosts ou formatos da Evoluti
 - API valida JWT do Supabase em toda rota → monta `TenantContext` → Prisma client extension injeta `company_id` em toda query → acesso a dados só via repositories.
 - `service_role` key jamais no frontend.
 - Frontend assina `messages` e `conversations` via Supabase Realtime; políticas RLS **read-only apenas nessas duas tabelas** (exceção única do ADR-0001/0005).
-- UI mínima: lista de conversas, tela da conversa (bolhas com estado, indicador de `from_me`), campo de envio, badge de status da instância. shadcn/ui. Nada além.
+- UI mínima: lista de conversas, tela da conversa (bolhas com estado, indicador de `from_me`), campo de envio, badge de status da instância. Mensagens de mídia recebidas aparecem como anexo simples (tipo + link da referência do provider), sem player/preview. shadcn/ui. Nada além.
 
 ## 8. Enforcement mecânico (critério de pronto no CI)
 
@@ -128,7 +128,7 @@ Nenhum código fora de `packages/providers` conhece hosts ou formatos da Evoluti
 ## 9. Estratégia de testes
 
 - **Suíte de contrato de providers** (coração da estratégia): a mesma bateria roda contra `EvolutionProvider` e `ZApiProvider`, alimentada por fixtures reais em `tests/providers/fixtures/{evolution,zapi}/`.
-- **Captura ao vivo:** com as chaves do usuário, o agente conecta nas instâncias, envia/recebe mensagens de teste e todo webhook arquivado é sanitizado e promovido a fixture. Nunca escrever fixture inventada quando existir payload real. Durante o desenvolvimento local, webhooks chegam via túnel (cloudflared/ngrok); com acessos do EasyPanel, o `apps/api` é deployado cedo para endpoint público estável.
+- **Captura ao vivo:** com as chaves do usuário, o agente conecta nas instâncias, envia/recebe mensagens de teste e todo webhook arquivado é sanitizado e promovido a fixture. Nunca escrever fixture inventada quando existir payload real. Durante o desenvolvimento local, webhooks chegam via túnel (cloudflared por padrão); com acessos do EasyPanel, o `apps/api` é deployado cedo para endpoint público estável.
 - **Unidade:** máquina de estados da mensagem, resolução de telefone (E.164 + 9º dígito), dedupe/idempotência, normalização.
 - Implementação com TDD (skill `superpowers:test-driven-development`).
 - Regra permanente: todo bug de provider vira fixture; toda fixture vira teste.
@@ -147,7 +147,7 @@ Nenhum código fora de `packages/providers` conhece hosts ou formatos da Evoluti
 | Risco | Mitigação |
 |---|---|
 | Z-API antecipada ameaça o teto de ~2 semanas (Fatias 0+1) | Z-API só começa depois do ponta-a-ponta Evolution verde; se o teto estourar, corta-se fundação (ou a Z-API volta para a Fatia 4), nunca se estica prazo |
-| Webhooks em dev local | Túnel cloudflared/ngrok desde o dia 1; deploy cedo no EasyPanel quando os acessos chegarem |
+| Webhooks em dev local | Túnel cloudflared desde o dia 1; deploy cedo no EasyPanel quando os acessos chegarem |
 | Redis do EasyPanel pendente | Docker local; connection string vira variável de ambiente, troca sem código |
 | Credenciais em texto no banco | Cifradas na aplicação antes de persistir; chave de cifra em variável de ambiente |
 | Payloads reais contêm dados pessoais | Sanitização obrigatória antes de promover a fixture (telefones e nomes trocados por valores sintéticos estáveis) |
