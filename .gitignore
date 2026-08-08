@@ -13,3 +13,6 @@ coverage/
 # Sistema
 desktop.ini
 .DS_Store
+
+# Workspace do processo SDD (scratch)
+.superpowers/
