@@ -1,0 +1,177 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum Provider {
+  evolution
+  zapi
+}
+
+enum ConnectionState {
+  connected
+  disconnected
+  connecting
+}
+
+enum ConversationStatus {
+  open
+  closed
+}
+
+enum MessageDirection {
+  inbound
+  outbound
+}
+
+enum MessageState {
+  received
+  queued
+  sending
+  sent
+  delivered
+  read
+  failed
+}
+
+enum MessageType {
+  text
+  image
+  audio
+  video
+  document
+  sticker
+  unknown
+}
+
+// Tenant. Exatamente um provider ativo por company; credenciais cifradas na aplicação (ADR-0002).
+model Company {
+  id                  String          @id @default(uuid()) @db.Uuid
+  name                String
+  activeProvider      Provider        @map("active_provider")
+  providerCredentials String          @map("provider_credentials")
+  connectionState     ConnectionState @default(disconnected) @map("connection_state")
+  createdAt           DateTime        @default(now()) @map("created_at")
+
+  users          User[]
+  customers      Customer[]
+  conversations  Conversation[]
+  messages       Message[]
+  customerEvents CustomerEvent[]
+
+  @@map("companies")
+}
+
+model User {
+  id         String   @id @default(uuid()) @db.Uuid
+  companyId  String   @map("company_id") @db.Uuid
+  authUserId String   @unique @map("auth_user_id") @db.Uuid
+  name       String
+  email      String
+  createdAt  DateTime @default(now()) @map("created_at")
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  @@map("users")
+}
+
+// Identidade canônica: E.164 + original preservado; matching com regra do 9º dígito (Domain.md).
+model Customer {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  phoneE164     String   @map("phone_e164")
+  phoneOriginal String   @map("phone_original")
+  name          String?
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company       Company         @relation(fields: [companyId], references: [id])
+  conversations Conversation[]
+  events        CustomerEvent[]
+
+  @@unique([companyId, phoneE164])
+  @@map("customers")
+}
+
+model Conversation {
+  id            String             @id @default(uuid()) @db.Uuid
+  companyId     String             @map("company_id") @db.Uuid
+  customerId    String             @map("customer_id") @db.Uuid
+  provider      Provider
+  externalId    String             @map("external_id")
+  status        ConversationStatus @default(open)
+  lastMessageAt DateTime?          @map("last_message_at")
+  createdAt     DateTime           @default(now()) @map("created_at")
+
+  company  Company   @relation(fields: [companyId], references: [id])
+  customer Customer  @relation(fields: [customerId], references: [id])
+  messages Message[]
+
+  @@unique([companyId, provider, externalId])
+  @@map("conversations")
+}
+
+// Tabela única de mensagens com máquina de estados (ADR-0006). Dedupe pela unique abaixo.
+model Message {
+  id                       String           @id @default(uuid()) @db.Uuid
+  companyId                String           @map("company_id") @db.Uuid
+  conversationId           String           @map("conversation_id") @db.Uuid
+  direction                MessageDirection
+  state                    MessageState
+  provider                 Provider
+  providerMessageId        String?          @map("provider_message_id")
+  fromMe                   Boolean          @default(false) @map("from_me")
+  type                     MessageType
+  text                     String?
+  editedText               String?          @map("edited_text")
+  mediaUrl                 String?          @map("media_url")
+  mediaMimeType            String?          @map("media_mime_type")
+  mediaCorrelationKey      String?          @map("media_correlation_key")
+  replyToProviderMessageId String?          @map("reply_to_provider_message_id")
+  failReason               String?          @map("fail_reason")
+  correlationId            String           @map("correlation_id") @db.Uuid
+  createdAt                DateTime         @default(now()) @map("created_at")
+
+  company      Company      @relation(fields: [companyId], references: [id])
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+
+  @@unique([companyId, provider, providerMessageId, direction])
+  @@index([conversationId, createdAt])
+  @@map("messages")
+}
+
+// Timeline append-only (ADR-0004): log, NÃO event sourcing — estado vive nas tabelas de domínio.
+model CustomerEvent {
+  id            String   @id @default(uuid()) @db.Uuid
+  companyId     String   @map("company_id") @db.Uuid
+  customerId    String   @map("customer_id") @db.Uuid
+  type          String
+  payload       Json
+  schemaVersion Int      @map("schema_version")
+  correlationId String   @map("correlation_id") @db.Uuid
+  occurredAt    DateTime @map("occurred_at")
+  createdAt     DateTime @default(now()) @map("created_at")
+
+  company  Company  @relation(fields: [companyId], references: [id])
+  customer Customer @relation(fields: [customerId], references: [id])
+
+  @@index([companyId, customerId, occurredAt])
+  @@map("customer_events")
+}
+
+// Arquivo de payload cru — fonte das fixtures. company_id nullable: arquiva mesmo sem tenant identificado.
+model RawWebhookEvent {
+  id         String   @id @default(uuid()) @db.Uuid
+  provider   Provider
+  companyId  String?  @map("company_id") @db.Uuid
+  payload    Json
+  processed  Boolean  @default(false)
+  error      String?
+  receivedAt DateTime @default(now()) @map("received_at")
+
+  @@index([provider, processed])
+  @@map("raw_webhook_events")
+}
