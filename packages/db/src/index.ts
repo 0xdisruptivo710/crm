@@ -1,0 +1,4 @@
+export { prisma, createTenantClient } from './client.js'
+export { runWithTenant, enterTenant, getTenant, type TenantContext } from './tenant-context.js'
+export { customersRepo } from './repositories/customers.js'
+export { resolveUserByAuthId } from './repositories/users.js'
