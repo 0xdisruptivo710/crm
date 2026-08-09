@@ -24,8 +24,8 @@ const app = buildApp()
 afterAll(() => app.close())
 
 describe('autenticação: caminho feliz (usuário cadastrado)', () => {
-  let companyId: string
-  let userId: string
+  let companyId: string | undefined
+  let userId: string | undefined
 
   beforeAll(async () => {
     const company = await prismaUnsafe.company.create({
@@ -57,11 +57,23 @@ describe('autenticação: caminho feliz (usuário cadastrado)', () => {
     // Remove exatamente as linhas criadas por este teste (escopadas por id) — nunca um
     // deleteMany amplo, que colidiria com fixtures de outros testes/seeds no mesmo banco.
     // Ordem: user antes de company (FK user.company_id -> company.id).
-    await prismaUnsafe.user.deleteMany({ where: { id: userId } })
-    await prismaUnsafe.company.deleteMany({ where: { id: companyId } })
+    //
+    // GUARDA OBRIGATÓRIA: o Vitest roda afterAll mesmo se beforeAll lançar (ex.: timeout
+    // de 10s contra o Postgres remoto, ou falha depois de criar a company mas antes de
+    // criar o user). Sem o `if`, um `userId`/`companyId` ainda `undefined` faria
+    // `deleteMany({ where: { id: undefined } })` — o Prisma IGNORA filtros com valor
+    // `undefined`, o que vira `deleteMany({})`: wipe da tabela inteira no banco de dev
+    // remoto compartilhado. Só apaga se o id foi de fato atribuído.
+    if (userId) await prismaUnsafe.user.deleteMany({ where: { id: userId } })
+    if (companyId) await prismaUnsafe.company.deleteMany({ where: { id: companyId } })
   })
 
   it('GET /me com JWT válido e usuário cadastrado responde 200 com o companyId do tenant', async () => {
+    // Checagem em runtime (não `!`): garante que a fixture do beforeAll foi criada antes
+    // de usar os ids, e transforma uma falha silenciosa de tipagem num erro claro caso
+    // beforeAll não tenha rodado até o fim.
+    if (!companyId || !userId) throw new Error('fixture não criada')
+
     // Prova o FINDING 1 corrigido: o hook onRequest (callback + runWithTenant) propaga
     // o TenantContext através dos awaits internos do handler /me. Antes da correção
     // (preHandler async + enterTenant após await), esta chamada lançava
