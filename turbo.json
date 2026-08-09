@@ -9,9 +9,21 @@
     // "env": modo estrito do turbo filtra vars não declaradas — no CI elas vêm do
     // ambiente do job (não do arquivo .env) e seriam descartadas sem esta lista.
     // Bônus: entram na chave de cache — mudou o ambiente, invalida o PASS cacheado.
+    // EVOLUTION_DEV_*: consumidos pelo teste de integração REAL de packages/providers
+    // (Task 5). No CI essas vars não existem -> describe.skip cuida do resto; aqui elas
+    // só precisam entrar na chave de cache do turbo, como as demais.
     "test": {
       "dependsOn": ["^test"],
-      "env": ["DATABASE_URL", "REDIS_URL", "SUPABASE_URL", "APP_ENCRYPTION_KEY"]
+      "env": [
+        "DATABASE_URL",
+        "REDIS_URL",
+        "SUPABASE_URL",
+        "APP_ENCRYPTION_KEY",
+        "EVOLUTION_DEV_BASE_URL",
+        "EVOLUTION_DEV_API_KEY",
+        "EVOLUTION_DEV_INSTANCE",
+        "EVOLUTION_DEV_SELF_PHONE"
+      ]
     }
   }
 }
