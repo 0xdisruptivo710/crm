@@ -24,4 +24,11 @@ describe('esqueleto da API', () => {
     })
     expect(res.statusCode).toBe(401)
   })
+
+  it('GET /webhooks/qualquer sem auth responde 404 (não 401)', async () => {
+    // Prova que o bypass público funciona: não precisa de auth header,
+    // mas como a rota não existe, retorna 404.
+    const res = await app.inject({ method: 'GET', url: '/webhooks/qualquer' })
+    expect(res.statusCode).toBe(404)
+  })
 })
