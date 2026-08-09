@@ -1,0 +1,47 @@
+name: CI
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: aios_pocket
+        ports:
+          - 55432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://postgres:postgres@localhost:55432/aios_pocket
+      REDIS_URL: redis://localhost:6379
+      SUPABASE_URL: https://example.supabase.co
+      APP_ENCRYPTION_KEY: CTsyIGgQZbdhAtVZDdWLmeYUFrsGxJCVyBqNbGVw5CE=
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      # scripts de package usam `dotenv -e ../../.env` — no CI o arquivo não existe; cria vazio
+      - run: touch .env
+      - run: pnpm --filter @aios-pocket/db run db:generate
+      - run: pnpm --filter @aios-pocket/db run db:deploy
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - run: pnpm test:arch
