@@ -68,6 +68,15 @@ export default tseslint.config(
           selector: 'Literal[value=/aios-evolution|z-api\\u002eio/]',
           message: 'Chamada direta a provider fora de packages/providers viola a arquitetura (ADR-0002).',
         },
+        {
+          // A regra acima só enxerga `Literal` (string simples): 'https://z-api.io'.
+          // URLs de provider em código real costumam vir em template literals, ex.:
+          // `${baseUrl}/z-api.io/...` ou `https://z-api.io/${path}` — que o parser
+          // representa como TemplateElement, não Literal. Sem este segundo seletor,
+          // a regra fica cega para o caso mais comum na prática.
+          selector: 'TemplateElement[value.raw=/aios-evolution|z-api\\u002eio/]',
+          message: 'Chamada direta a provider fora de packages/providers viola a arquitetura (ADR-0002).',
+        },
       ],
     },
   },
