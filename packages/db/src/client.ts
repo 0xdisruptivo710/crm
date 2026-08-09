@@ -9,27 +9,35 @@ const FORBIDDEN_OPERATIONS = new Set(['findUnique', 'findUniqueOrThrow', 'update
 export function createTenantClient(base: PrismaClient) {
   return base.$extends({
     query: {
-      $allModels: {
-        async $allOperations({ model, operation, args, query }) {
-          if (TENANT_EXEMPT_MODELS.has(model)) return query(args)
-          if (FORBIDDEN_OPERATIONS.has(operation)) {
-            throw new Error(
-              `Operação ${operation} proibida em ${model}: use findFirst/updateMany/deleteMany com filtro de tenant`,
-            )
-          }
-          const { companyId } = getTenant()
-          const a = args as { where?: object; data?: object | object[] }
-          let next: object
-          if (operation === 'create') {
-            next = { ...a, data: { ...(a.data as object), companyId } }
-          } else if (operation === 'createMany' || operation === 'createManyAndReturn') {
-            const rows = Array.isArray(a.data) ? a.data : [a.data as object]
-            next = { ...a, data: rows.map((d) => ({ ...d, companyId })) }
-          } else {
-            next = { ...a, where: { AND: [{ companyId }, a.where ?? {}] } }
-          }
-          return query(next as Parameters<typeof query>[0])
-        },
+      // Handler no nível do client (não dentro de $allModels): esse nível intercepta
+      // TAMBÉM as operações "raw" ($queryRaw/$queryRawUnsafe/$executeRaw/$executeRawUnsafe),
+      // que não pertencem a nenhum model — nelas `model` vem `undefined`. Se ficássemos só
+      // em $allModels.$allOperations (como na primeira versão), essas operações passavam
+      // direto pela extension sem qualquer filtro de tenant, silenciosamente.
+      async $allOperations({ model, operation, args, query }) {
+        if (model === undefined) {
+          throw new Error(
+            'Operações raw são proibidas no client tenantizado — use repositories (ADR-0001)',
+          )
+        }
+        if (TENANT_EXEMPT_MODELS.has(model)) return query(args)
+        if (FORBIDDEN_OPERATIONS.has(operation)) {
+          throw new Error(
+            `Operação ${operation} proibida em ${model}: use findFirst/updateMany/deleteMany com filtro de tenant`,
+          )
+        }
+        const { companyId } = getTenant()
+        const a = args as { where?: object; data?: object | object[] }
+        let next: object
+        if (operation === 'create') {
+          next = { ...a, data: { ...(a.data as object), companyId } }
+        } else if (operation === 'createMany' || operation === 'createManyAndReturn') {
+          const rows = Array.isArray(a.data) ? a.data : [a.data as object]
+          next = { ...a, data: rows.map((d) => ({ ...d, companyId })) }
+        } else {
+          next = { ...a, where: { AND: [{ companyId }, a.where ?? {}] } }
+        }
+        return query(next as Parameters<typeof query>[0])
       },
     },
   })

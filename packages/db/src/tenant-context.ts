@@ -27,6 +27,16 @@ export function runWithTenant<T>(ctx: TenantContext, fn: () => T): T {
 }
 
 // Para hooks do Fastify: fixa o contexto na execução assíncrona da request corrente.
+//
+// ATENÇÃO (footgun): diferente de runWithTenant, enterTenant NÃO tem escopo — ele fixa
+// o contexto para TUDO que rodar depois, na mesma cadeia assíncrona, até o processo
+// decidir trocar (ou até a request terminar, se usado corretamente). Use SOMENTE dentro
+// de um hook por-request (ex.: preHandler/onRequest do Fastify, chamado uma vez no início
+// de cada request). NUNCA chame em um recurso assíncrono compartilhado ou de vida longa
+// (worker de fila reaproveitado entre jobs, conexão de socket persistente, singleton,
+// listener global) — nesses casos o tenant de uma execução vaza para as próximas que
+// reusam o mesmo recurso. Fora do hook por-request, prefira sempre runWithTenant, que
+// delimita o contexto à própria chamada.
 export function enterTenant(ctx: TenantContext): void {
   storage.enterWith(ctx)
 }
