@@ -25,6 +25,7 @@ describe('incomingMessageSchema', () => {
   })
 
   it('rejeita mensagem sem fromMe (campo aprendido em produção — obrigatório)', () => {
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
     const { fromMe: _omitted, ...semFromMe } = validIncoming
     expect(incomingMessageSchema.safeParse(semFromMe).success).toBe(false)
   })
