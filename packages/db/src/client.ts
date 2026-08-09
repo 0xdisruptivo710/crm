@@ -1,5 +1,6 @@
-import { PrismaClient } from '@prisma/client'
+import type { PrismaClient } from '@prisma/client'
 import { getTenant } from './tenant-context.js'
+import { prismaUnsafe } from './unsafe.js'
 
 // Whitelist de modelos sem tenant — manter mínima e justificada.
 const TENANT_EXEMPT_MODELS = new Set(['RawWebhookEvent'])
@@ -43,4 +44,4 @@ export function createTenantClient(base: PrismaClient) {
   })
 }
 
-export const prisma = createTenantClient(new PrismaClient())
+export const prisma = createTenantClient(prismaUnsafe)

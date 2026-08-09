@@ -1,7 +1,9 @@
 import { createRemoteJWKSet, jwtVerify } from 'jose'
 import { config } from '../config.js'
 
-const jwks = createRemoteJWKSet(new URL('/auth/v1/.well-known/jwks.json', config.SUPABASE_URL))
+const jwks = createRemoteJWKSet(new URL('/auth/v1/.well-known/jwks.json', config.SUPABASE_URL), {
+  timeoutDuration: 5000, // Supabase indisponível = falha em 5s, não espera default
+})
 
 // Constrói o issuer: <SUPABASE_URL>/auth/v1 (sem trailing slash).
 // Exemplo: https://xyzabc.supabase.co/auth/v1

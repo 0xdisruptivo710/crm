@@ -16,4 +16,9 @@ describe('cifra de credenciais (AES-256-GCM)', () => {
     const adulterado = cifrado.slice(0, -4) + 'AAAA'
     expect(() => decryptJson(adulterado, KEY)).toThrow()
   })
+
+  it('chave de tamanho errado falha com erro claro', () => {
+    expect(() => encryptJson({ a: 1 }, 'Y3VydGE=')).toThrow('32 bytes')
+    expect(() => decryptJson('AAAA', 'Y3VydGE=')).toThrow('32 bytes')
+  })
 })

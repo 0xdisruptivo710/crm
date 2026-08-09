@@ -11,8 +11,14 @@ import { config } from '../config.js'
 //   infra (regra do CLAUDE.md, seção 4; ADR-0004). Falhar rápido aqui é
 //   intencional: melhor a rota devolver 5xx do que travar esperando retry.
 export const redisWorkerConnection = new IORedis(config.REDIS_URL, { maxRetriesPerRequest: null })
+redisWorkerConnection.on('error', (err) => {
+  console.error('[redis worker] erro de conexão', err.message)
+})
 
 // enableOfflineQueue: false faz .add() rejeitar na hora quando desconectado,
 // em vez de acumular comandos em memória à espera de reconexão (o que também
 // prenderia a requisição HTTP chamadora).
 export const redisQueueConnection = new IORedis(config.REDIS_URL, { enableOfflineQueue: false })
+redisQueueConnection.on('error', (err) => {
+  console.error('[redis queue] erro de conexão', err.message)
+})
