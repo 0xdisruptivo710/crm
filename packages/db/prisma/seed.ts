@@ -71,7 +71,12 @@ async function main(): Promise<void> {
     create: { companyId: company.id, authUserId, name: 'Piloto', email },
   })
 
+  // webhookToken (ADR-0003) é o que se cadastra manualmente nos dashboards
+  // da Evolution API e da Z-API para o piloto — expor aqui poupa uma consulta ao banco.
   console.log(`seed ok — company ${company.id}, user auth ${authUserId}`)
+  console.log(`webhook token: ${company.webhookToken}`)
+  console.log(`  POST /webhooks/evolution/${company.webhookToken}`)
+  console.log(`  POST /webhooks/zapi/${company.webhookToken}`)
 }
 
 main()

@@ -54,6 +54,7 @@ model Company {
   name                String
   activeProvider      Provider        @map("active_provider")
   providerCredentials String          @map("provider_credentials")
+  webhookToken        String          @unique @default(uuid()) @map("webhook_token")
   connectionState     ConnectionState @default(disconnected) @map("connection_state")
   createdAt           DateTime        @default(now()) @map("created_at")
 
