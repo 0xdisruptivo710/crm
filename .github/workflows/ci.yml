@@ -30,9 +30,9 @@ jobs:
       SUPABASE_URL: https://example.supabase.co
       APP_ENCRYPTION_KEY: CTsyIGgQZbdhAtVZDdWLmeYUFrsGxJCVyBqNbGVw5CE=
     steps:
-      - uses: actions/checkout@v4
-      - uses: pnpm/action-setup@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
           cache: pnpm
@@ -41,6 +41,13 @@ jobs:
       - run: touch .env
       - run: pnpm --filter @aios-pocket/db run db:generate
       - run: pnpm --filter @aios-pocket/db run db:deploy
+      # Detecta schema.prisma editado sem migração gerada (drift silencioso)
+      - run: >
+          pnpm --filter @aios-pocket/db exec prisma migrate diff
+          --from-migrations prisma/migrations
+          --to-schema-datamodel prisma/schema.prisma
+          --shadow-database-url "$DATABASE_URL"
+          --exit-code
       - run: pnpm typecheck
       - run: pnpm lint
       - run: pnpm test
