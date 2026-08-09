@@ -4,6 +4,8 @@
     "build": { "dependsOn": ["^build"], "outputs": ["dist/**", ".next/**"] },
     "dev": { "cache": false, "persistent": true },
     "typecheck": { "dependsOn": ["^typecheck"] },
-    "test": { "dependsOn": [] }
+    // serializa testes ao longo do grafo de dependências — os testes de db (que fazem
+    // wipe) terminam antes dos da api (que criam fixtures) no mesmo banco remoto.
+    "test": { "dependsOn": ["^test"] }
   }
 }
