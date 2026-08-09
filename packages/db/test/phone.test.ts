@@ -28,4 +28,19 @@ describe('telefone canônico (Domain.md: E.164 + 9º dígito)', () => {
   it('rejeita entrada sem dígitos suficientes', () => {
     expect(() => canonicalizePhone('abc')).toThrow('telefone')
   })
+
+  it('rejeita JID de grupo WhatsApp', () => {
+    expect(() => canonicalizePhone('120363025246125437@g.us')).toThrow('grupo/lid')
+    expect(() => canonicalizePhone('120363025246125437@G.US')).toThrow('grupo/lid')
+  })
+
+  it('rejeita identificador de privacidade @lid', () => {
+    expect(() => canonicalizePhone('15551234567@lid')).toThrow('grupo/lid')
+    expect(() => canonicalizePhone('15551234567@LID')).toThrow('grupo/lid')
+  })
+
+  it('rejeita números com mais de 15 dígitos (teto E.164)', () => {
+    expect(() => canonicalizePhone('5515997424782123')).toThrow('telefone') // 16 dígitos
+    expect(() => canonicalizePhone('120363025246125437')).toThrow('telefone') // 18 dígitos
+  })
 })

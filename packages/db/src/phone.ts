@@ -8,8 +8,14 @@ export interface CanonicalPhone {
 }
 
 export function canonicalizePhone(raw: string): CanonicalPhone {
+  // Rejeita JID de grupo/lid ANTES de processar
+  if (/@(g\.us|lid)$/i.test(raw)) {
+    throw new Error(`telefone inválido (identificador de grupo/lid): "${raw}"`)
+  }
+  // Strip de sufixos conhecidos (@s.whatsapp.net, @c.us) e remove tudo que não é dígito
+  // @g.us e @lid já foram rejeitados acima; qualquer outro sufixo @ é dropado
   const digits = raw.replace(/@.*$/, '').replace(/\D/g, '')
-  if (digits.length < 8) {
+  if (digits.length < 8 || digits.length > 15) {
     throw new Error(`telefone inválido: "${raw}"`)
   }
   return { e164: `+${digits}`, original: raw }
