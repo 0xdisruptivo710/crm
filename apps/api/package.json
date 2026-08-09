@@ -1,0 +1,23 @@
+{
+  "name": "@aios-pocket/api",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "dotenv -e ../../.env -- tsx watch src/server.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "dotenv -e ../../.env -- vitest run"
+  },
+  "dependencies": {
+    "@aios-pocket/contracts": "workspace:*",
+    "@aios-pocket/db": "workspace:*",
+    "fastify": "^5.2.0",
+    "jose": "^6.0.0",
+    "zod": "^4.0.0"
+  },
+  "devDependencies": {
+    "dotenv-cli": "^8.0.0",
+    "tsx": "^4.19.0",
+    "vitest": "^3.0.0"
+  }
+}
