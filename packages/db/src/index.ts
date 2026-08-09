@@ -3,3 +3,4 @@ export { runWithTenant, getTenant, type TenantContext } from './tenant-context.j
 export { customersRepo } from './repositories/customers.js'
 export { resolveUserByAuthId } from './repositories/users.js'
 export { encryptJson, decryptJson } from './crypto.js'
+export { canonicalizePhone, phoneMatchCandidates, type CanonicalPhone } from './phone.js'
