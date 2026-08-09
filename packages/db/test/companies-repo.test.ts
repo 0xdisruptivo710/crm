@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, it } from 'vitest'
+import { afterAll, beforeAll, describe, expect, it } from 'vitest'
 import { prismaUnsafe } from '../src/unsafe.js'
 import { companiesRepo } from '../src/repositories/companies.js'
 
@@ -11,6 +11,13 @@ beforeAll(async () => {
   })
   token = company.webhookToken
   companyId = company.id
+})
+
+afterAll(async () => {
+  // Guard por id (Plano A): nunca um deleteMany desacompanhado de filtro.
+  if (companyId) {
+    await prismaUnsafe.company.deleteMany({ where: { id: companyId } })
+  }
 })
 
 describe('companiesRepo (pré-tenant: webhooks autenticam por token)', () => {
