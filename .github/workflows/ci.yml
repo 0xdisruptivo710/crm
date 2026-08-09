@@ -41,12 +41,16 @@ jobs:
       - run: touch .env
       - run: pnpm --filter @aios-pocket/db run db:generate
       - run: pnpm --filter @aios-pocket/db run db:deploy
+      # Shadow database DEDICADO para o drift check — NUNCA reutilizar DATABASE_URL
+      # como shadow: o Prisma RESETA o shadow (replay das migrações); reutilizar o
+      # banco vivo pode apagar todos os dados (anti-pattern documentado do Prisma).
+      - run: echo 'CREATE DATABASE aios_pocket_shadow;' | pnpm --filter @aios-pocket/db exec prisma db execute --stdin --url "postgresql://postgres:postgres@localhost:55432/postgres"
       # Detecta schema.prisma editado sem migração gerada (drift silencioso)
       - run: >
           pnpm --filter @aios-pocket/db exec prisma migrate diff
           --from-migrations prisma/migrations
           --to-schema-datamodel prisma/schema.prisma
-          --shadow-database-url "$DATABASE_URL"
+          --shadow-database-url "postgresql://postgres:postgres@localhost:55432/aios_pocket_shadow"
           --exit-code
       - run: pnpm typecheck
       - run: pnpm lint
