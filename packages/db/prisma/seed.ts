@@ -40,10 +40,11 @@ async function main(): Promise<void> {
 
   const credentials = encryptJson(
     {
+      // Instância Evolution DEDICADA de dev (Plano B T4) — a de produção (murilo) é intocável.
       evolution: {
-        baseUrl: requireEnv('EVOLUTION_BASE_URL'),
-        apiKey: requireEnv('EVOLUTION_API_KEY'),
-        instanceId: requireEnv('EVOLUTION_INSTANCE_ID'),
+        baseUrl: requireEnv('EVOLUTION_DEV_BASE_URL'),
+        apiKey: requireEnv('EVOLUTION_DEV_API_KEY'),
+        instanceId: requireEnv('EVOLUTION_DEV_INSTANCE'),
       },
       zapi: {
         baseUrl: requireEnv('ZAPI_BASE_URL'),
