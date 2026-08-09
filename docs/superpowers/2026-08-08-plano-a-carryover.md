@@ -31,6 +31,13 @@ Itens levantados nas revisões do Plano A e triados pela revisão final da branc
 - Database.md: registrar exceção de convenção — types de enum Postgres em PascalCase (renomear exigiria migração sem ganho funcional).
 - Polimentos de type deferidos: `Resolved<T>` no `runWithTenant`, `Omit` das operações proibidas no tipo do client, typing do `isThenable`.
 
+## Pós-merge (aprendizados do primeiro CI real — já corrigidos na master)
+
+- `@types/node` precisa ser devDependency explícita onde builtins de node são usados — hoisting local mascarava (quebrou no Linux limpo do CI).
+- Turbo em modo estrito filtra env vars não declaradas: toda task que consome env do job de CI precisa da lista em `tasks.<task>.env` no turbo.json (bônus: env entra na chave de cache).
+- Lição de verificação: simular CI pelo arquivo `.env` NÃO é fiel — o mecanismo de entrega (arquivo vs ambiente do processo) muda o comportamento do turbo. Simulação fiel = `.env` vazio + vars por processo.
+- Aviso do Actions: checkout@v4/setup-node@v4/pnpm-action@v4 têm target Node 20 deprecado (rodam forçadas em Node 24) — bump para as majors novas no Plano B.
+
 ## Regra de processo adotada (vale para todos os planos)
 
 Toda costura entre tasks (auth→tenant, rota→fila, webhook→pipeline) ganha pelo menos **um teste happy-path mockado no mesmo plano** — o Critical do Plano A (contexto ALS não propagava; só branches de erro testados) ficou invisível a todas as revisões por task exatamente por falta disso.
