@@ -1,6 +1,6 @@
 import { Worker } from 'bullmq'
 import { domainEventSchema } from '@aios-pocket/contracts'
-import { redisConnection } from './connection.js'
+import { redisWorkerConnection } from './connection.js'
 import { QUEUE } from './queues.js'
 import { getHandlers } from './events.js'
 
@@ -13,6 +13,6 @@ export function startDomainEventsWorker(): Worker {
         await handler(event)
       }
     },
-    { connection: redisConnection },
+    { connection: redisWorkerConnection },
   )
 }

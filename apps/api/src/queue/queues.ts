@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq'
-import { redisConnection } from './connection.js'
+import { redisQueueConnection } from './connection.js'
 
 export const QUEUE = {
   webhookProcessing: 'webhook-processing',
@@ -7,6 +7,7 @@ export const QUEUE = {
   domainEvents: 'domain-events',
 } as const
 
-export const webhookProcessingQueue = new Queue(QUEUE.webhookProcessing, { connection: redisConnection })
-export const messageSendQueue = new Queue(QUEUE.messageSend, { connection: redisConnection })
-export const domainEventsQueue = new Queue(QUEUE.domainEvents, { connection: redisConnection })
+// Producers usam redisQueueConnection (falha rápido) — nunca a conexão do worker.
+export const webhookProcessingQueue = new Queue(QUEUE.webhookProcessing, { connection: redisQueueConnection })
+export const messageSendQueue = new Queue(QUEUE.messageSend, { connection: redisQueueConnection })
+export const domainEventsQueue = new Queue(QUEUE.domainEvents, { connection: redisQueueConnection })
