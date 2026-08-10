@@ -2,12 +2,14 @@ import { buildApp } from './app.js'
 import { config } from './config.js'
 import { startDomainEventsWorker } from './queue/workers.js'
 import { startWebhookWorker } from './queue/webhook-worker.js'
+import { startSendWorker } from './queue/send-worker.js'
 
 const app = buildApp()
 
 // Um único deployable: API + workers no mesmo processo (stack inegociável).
 startDomainEventsWorker()
 startWebhookWorker()
+startSendWorker()
 
 app.listen({ port: config.PORT, host: '0.0.0.0' }).catch((err) => {
   app.log.error(err)

@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
 import { runWithTenant, getTenant, resolveUserByAuthId } from '@aios-pocket/db'
 import { verifySupabaseJwt } from './auth/verify.js'
+import { registerMessageRoutes } from './routes/messages.js'
 import { registerWebhookRoutes } from './routes/webhooks.js'
 
 // Predicate para rotas públicas: exatamente /health (com/sem query), e /webhooks/* (sem auth).
@@ -72,6 +73,7 @@ export function buildApp(): FastifyInstance {
   })
 
   registerWebhookRoutes(app)
+  registerMessageRoutes(app)
 
   app.setNotFoundHandler((_req, reply) => reply.code(404).send({ error: 'rota inexistente' }))
 

@@ -19,9 +19,29 @@ function markProcessed(rawId: string, error?: string) {
   return prisma.rawWebhookEvent.update({ where: { id: rawId }, data: { processed: true, error: error ?? null } })
 }
 
-type IncomingOutcome = { outcome: 'applied' } | { outcome: 'invalid_phone'; reason: string }
+type IncomingOutcome =
+  | { outcome: 'applied' }
+  | { outcome: 'invalid_phone'; reason: string }
+  | { outcome: 'echo' }
 
 async function handleIncomingMessage(companyId: string, msg: IncomingMessage): Promise<IncomingOutcome> {
+  // Guarda do eco fromMe (OBRIGAÇÃO da re-review T10 / binding design da Task 11): quando
+  // o PRÓPRIO envio (rota POST /messages + worker `message-send`, apps/api/src/pipeline/
+  // send-message.ts) sai pela Evolution, a instância devolve esse mesmo envio de volta
+  // como um webhook messages.upsert com fromMe=true e o MESMO providerMessageId que a
+  // Evolution atribuiu na resposta do sendText. Sem esta guarda, o dedupe por P2002
+  // (mais abaixo) encontraria a Message OUTBOUND já criada pelo worker de envio e, mesmo
+  // sem duplicar a LINHA, ainda publicaria timeline/MessageReceived — duplicados, pois o
+  // envio já foi registrado (timeline `message_sent` + evento `MessageSent`) por
+  // send-message.ts. Checado ANTES de qualquer I/O de customer/conversation — um eco
+  // reconhecido não deve gerar nenhuma escrita nova.
+  if (msg.fromMe) {
+    const ownSend = await prisma.message.findFirst({
+      where: { provider: msg.provider, providerMessageId: msg.providerMessageId, direction: 'outbound' },
+    })
+    if (ownSend) return { outcome: 'echo' }
+  }
+
   // JIDs "veneno" (status@broadcast, @newsletter, ids curtos etc.) passam pelo parser —
   // que só filtra grupo/lid (packages/providers) — mas não são telefone válido;
   // canonicalizePhone lança. Sem este catch, o job re-tentava 3x e morria exausto para
@@ -290,6 +310,12 @@ export async function processRawWebhook(rawEventId: string): Promise<void> {
       const result = await handleIncomingMessage(companyId, event)
       if (result.outcome === 'invalid_phone') {
         await markProcessed(raw.id, `telefone inválido: ${result.reason}`)
+        return
+      }
+      if (result.outcome === 'echo') {
+        // Eco do próprio envio (ver comentário da guarda em handleIncomingMessage) —
+        // marcado processado com motivo, sem timeline/evento (já registrados no envio).
+        await markProcessed(raw.id, 'echo do próprio envio')
         return
       }
     } else if (event.kind === 'message_status_update') {

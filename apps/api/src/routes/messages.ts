@@ -1,0 +1,56 @@
+import { randomUUID } from 'node:crypto'
+import type { FastifyInstance } from 'fastify'
+import { sendMessageRequestSchema } from '@aios-pocket/contracts'
+import { getTenant, prisma } from '@aios-pocket/db'
+import { messageSendQueue } from '../queue/queues.js'
+
+// Rota autenticada (o hook global de apps/api/src/app.ts cuida do JWT/tenant — nenhuma
+// checagem de auth aqui). Cria o Message `queued` e enfileira o envio: a rota NUNCA
+// espera o provider (regra do CLAUDE.md §4) — responde 202 assim que o job entra na fila.
+export function registerMessageRoutes(app: FastifyInstance): void {
+  app.post('/messages', async (req, reply) => {
+    const parsed = sendMessageRequestSchema.safeParse(req.body)
+    if (!parsed.success) {
+      // Issues resumidas (path + mensagem) — nunca o objeto de erro do zod inteiro.
+      const issues = parsed.error.issues.map((issue) => ({ path: issue.path.join('.'), message: issue.message }))
+      return reply.code(400).send({ error: 'payload inválido', issues })
+    }
+
+    const { conversationId, text } = parsed.data
+    const { companyId } = getTenant()
+
+    // Client tenantizado (packages/db/src/client.ts) injeta `companyId` no where — uma
+    // Conversation de outra company nunca é encontrada aqui, respondendo 404 como se não
+    // existisse (nenhum vazamento de "existe, mas não é sua").
+    const conversation = await prisma.conversation.findFirst({ where: { id: conversationId } })
+    if (!conversation) return reply.code(404).send({ error: 'conversa não encontrada' })
+
+    const message = await prisma.message.create({
+      data: {
+        companyId,
+        conversationId: conversation.id,
+        direction: 'outbound',
+        state: 'queued',
+        // provider = o mesmo da Conversation (CUIDADO da Task 11: o client tenantizado não
+        // lê Company — a Conversation já carrega o provider certo, sem query extra).
+        provider: conversation.provider,
+        type: 'text',
+        text,
+        correlationId: randomUUID(),
+      },
+    })
+
+    await messageSendQueue.add(
+      'send',
+      { messageId: message.id, companyId },
+      {
+        jobId: message.id,
+        attempts: 3,
+        backoff: { type: 'exponential', delay: 2000 },
+        removeOnComplete: { age: 7 * 24 * 3600 },
+      },
+    )
+
+    return reply.code(202).send({ messageId: message.id })
+  })
+}
