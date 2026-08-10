@@ -1,6 +1,6 @@
 import type { FastifyInstance, FastifyRequest } from 'fastify'
 import { companiesRepo, prisma } from '@aios-pocket/db'
-import { webhookProcessingQueue } from '../queue/queues.js'
+import { WEBHOOK_JOB_RETRY_OPTIONS, webhookProcessingQueue } from '../queue/queues.js'
 
 const PROVIDERS = ['evolution', 'zapi'] as const
 type ProviderParam = (typeof PROVIDERS)[number]
@@ -54,7 +54,7 @@ export function registerWebhookRoutes(app: FastifyInstance): void {
           await webhookProcessingQueue.add(
             'process',
             { rawEventId: raw.id, provider, companyId: company.id },
-            { jobId: raw.id },
+            { jobId: raw.id, ...WEBHOOK_JOB_RETRY_OPTIONS },
           )
         } catch (err) {
           // Falha ao enfileirar NÃO pode virar 5xx: o payload já está arquivado (invariante

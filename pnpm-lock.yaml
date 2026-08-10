@@ -44,6 +44,9 @@ importers:
       '@aios-pocket/db':
         specifier: workspace:*
         version: link:../../packages/db
+      '@aios-pocket/providers':
+        specifier: workspace:*
+        version: link:../../packages/providers
       bullmq:
         specifier: ^5.34.0
         version: 5.81.3
