@@ -1,0 +1,17 @@
+{
+  "data": {
+    "wuid": "5511999990005@s.whatsapp.net",
+    "state": "open",
+    "instance": "aios-pocket-fixture",
+    "profileName": "Cliente Teste 3",
+    "statusReason": 200,
+    "profilePictureUrl": "https://pps.whatsapp.net/v/t61.24694-24/759033548_1430868495550469_7883962753959455881_n.jpg?ccb=x&oh=x&oe=x&_nc_sid=x&_nc_cat=x"
+  },
+  "event": "connection.update",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T22:59:50.323Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

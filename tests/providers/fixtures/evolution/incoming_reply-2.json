@@ -1,0 +1,115 @@
+{
+  "data": {
+    "key": {
+      "id": "3A3E4C94912BC9B9AB6F",
+      "fromMe": false,
+      "remoteJid": "5511999990006@s.whatsapp.net",
+      "participant": "",
+      "remoteJidAlt": "5511999990006@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "source": "ios",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "conversation": "endereco re",
+      "messageContextInfo": {
+        "threadId": [],
+        "messageSecret": {
+          "0": 47,
+          "1": 61,
+          "2": 134,
+          "3": 28,
+          "4": 6,
+          "5": 35,
+          "6": 28,
+          "7": 92,
+          "8": 85,
+          "9": 32,
+          "10": 180,
+          "11": 254,
+          "12": 78,
+          "13": 19,
+          "14": 50,
+          "15": 63,
+          "16": 233,
+          "17": 14,
+          "18": 143,
+          "19": 102,
+          "20": 40,
+          "21": 102,
+          "22": 0,
+          "23": 245,
+          "24": 243,
+          "25": 228,
+          "26": 136,
+          "27": 130,
+          "28": 19,
+          "29": 56,
+          "30": 29,
+          "31": 171
+        },
+        "deviceListMetadata": {
+          "senderKeyHash": {
+            "0": 105,
+            "1": 226,
+            "2": 44,
+            "3": 178,
+            "4": 179,
+            "5": 145,
+            "6": 75,
+            "7": 90,
+            "8": 110,
+            "9": 38
+          },
+          "senderTimestamp": {
+            "low": 1786196304,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyHash": {
+            "0": 221,
+            "1": 84,
+            "2": 70,
+            "3": 166,
+            "4": 175,
+            "5": 217,
+            "6": 89,
+            "7": 82,
+            "8": 140,
+            "9": 86
+          },
+          "senderKeyIndexes": [],
+          "recipientTimestamp": {
+            "low": 1786298587,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyIndexes": []
+        },
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "pushName": "Cliente Teste 2",
+    "instanceId": "00000000-0000-0000-0000-000000000000",
+    "contextInfo": {
+      "stanzaId": "3EB0E11F092A307C840CE1",
+      "quotedType": 0,
+      "participant": "5511999990007@lid",
+      "mentionedJid": [],
+      "groupMentions": [],
+      "quotedMessage": {
+        "conversation": "detalhe com"
+      },
+      "statusAttributions": []
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1786327850
+  },
+  "event": "messages.upsert",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T23:10:50.844Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

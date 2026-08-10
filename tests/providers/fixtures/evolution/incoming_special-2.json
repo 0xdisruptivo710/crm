@@ -1,0 +1,83 @@
+{
+  "data": {
+    "key": {
+      "id": "CEB999381212C46E4FEB",
+      "fromMe": false,
+      "remoteJid": "5511999990009@s.whatsapp.net",
+      "participant": "",
+      "remoteJidAlt": "5511999990009@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "source": "unknown",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "templateMessage": {
+        "templateId": "988953780163175",
+        "hydratedTemplate": {
+          "templateId": "988953780163175",
+          "hydratedButtons": [],
+          "hydratedTitleText": "",
+          "hydratedContentText": "reuniao seguimos aguardo revisar conversa assunto detalhe combinado positivo agenda cliente suporte duvida produto anexo contrato valor cons"
+        }
+      },
+      "messageContextInfo": {
+        "threadId": [],
+        "deviceListMetadata": {
+          "senderKeyHash": {
+            "0": 4,
+            "1": 43,
+            "2": 81,
+            "3": 81,
+            "4": 73,
+            "5": 3,
+            "6": 50,
+            "7": 73,
+            "8": 153,
+            "9": 254
+          },
+          "senderTimestamp": {
+            "low": 1786124980,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyHash": {
+            "0": 87,
+            "1": 229,
+            "2": 230,
+            "3": 44,
+            "4": 94,
+            "5": 46,
+            "6": 196,
+            "7": 219,
+            "8": 21,
+            "9": 136
+          },
+          "senderKeyIndexes": [],
+          "senderAccountType": 1,
+          "recipientTimestamp": {
+            "low": 1786298587,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyIndexes": [
+            0,
+            3
+          ]
+        },
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "pushName": null,
+    "instanceId": "00000000-0000-0000-0000-000000000000",
+    "contextInfo": null,
+    "messageType": "templateMessage",
+    "messageTimestamp": 1786309220
+  },
+  "event": "messages.upsert",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T18:00:20.918Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

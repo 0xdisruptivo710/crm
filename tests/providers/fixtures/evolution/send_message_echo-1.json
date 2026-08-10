@@ -1,0 +1,37 @@
+{
+  "data": {
+    "key": {
+      "id": "3EB0B210650C926AAD550C",
+      "fromMe": true,
+      "remoteJid": "5511999990005@s.whatsapp.net"
+    },
+    "source": "web",
+    "status": "PENDING",
+    "message": {
+      "conversation": "consulta atendimento confirmar horario disponivel obrigado equipe proposta documento retorno"
+    },
+    "pushName": "Cliente Teste 5",
+    "instanceId": "00000000-0000-0000-0000-000000000000",
+    "contextInfo": {
+      "mentionedJid": [],
+      "groupMentions": [],
+      "disappearingMode": {
+        "initiator": 0
+      },
+      "ephemeralSettingTimestamp": {
+        "low": 1786153711,
+        "high": 0,
+        "unsigned": false
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1786326511
+  },
+  "event": "send.message",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T22:48:32.947Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

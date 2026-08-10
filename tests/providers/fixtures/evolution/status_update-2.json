@@ -1,0 +1,17 @@
+{
+  "data": {
+    "keyId": "3AEBDB6659701F736BFF",
+    "fromMe": false,
+    "status": "READ",
+    "messageId": "cmsm89swq25j4ob551ggurrr3",
+    "remoteJid": "5511999990008@lid",
+    "instanceId": "00000000-0000-0000-0000-000000000000"
+  },
+  "event": "messages.update",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T17:58:10.897Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

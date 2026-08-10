@@ -10,7 +10,8 @@
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
     "lint": "eslint .",
-    "test:arch": "vitest run tests/architecture"
+    "test:arch": "vitest run tests/architecture",
+    "fixtures:harvest": "dotenv -e .env -- tsx scripts/harvest-fixtures.ts"
   },
   "devDependencies": {
     "@types/node": "^22.13.0",
@@ -19,6 +20,8 @@
     "eslint": "^9.20.0",
     "@eslint/js": "^9.20.0",
     "typescript-eslint": "^8.24.0",
-    "vitest": "^3.0.0"
+    "vitest": "^3.0.0",
+    "dotenv-cli": "^8.0.0",
+    "tsx": "^4.19.0"
   }
 }

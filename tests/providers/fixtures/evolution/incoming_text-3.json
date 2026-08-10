@@ -1,0 +1,104 @@
+{
+  "data": {
+    "key": {
+      "id": "3A245B67166D7896E259",
+      "fromMe": false,
+      "remoteJid": "5511999990006@s.whatsapp.net",
+      "participant": "",
+      "remoteJidAlt": "5511999990006@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "source": "ios",
+    "status": "DELIVERY_ACK",
+    "message": {
+      "conversation": "produto anexo contrato valor consulta atendimento confirmar horario disponivel obrigado equipe proposta documento retorno processo",
+      "messageContextInfo": {
+        "threadId": [],
+        "messageSecret": {
+          "0": 34,
+          "1": 163,
+          "2": 253,
+          "3": 4,
+          "4": 98,
+          "5": 122,
+          "6": 221,
+          "7": 116,
+          "8": 154,
+          "9": 89,
+          "10": 246,
+          "11": 232,
+          "12": 101,
+          "13": 179,
+          "14": 109,
+          "15": 66,
+          "16": 141,
+          "17": 12,
+          "18": 133,
+          "19": 166,
+          "20": 66,
+          "21": 52,
+          "22": 13,
+          "23": 112,
+          "24": 96,
+          "25": 1,
+          "26": 31,
+          "27": 0,
+          "28": 209,
+          "29": 4,
+          "30": 32,
+          "31": 249
+        },
+        "deviceListMetadata": {
+          "senderKeyHash": {
+            "0": 105,
+            "1": 226,
+            "2": 44,
+            "3": 178,
+            "4": 179,
+            "5": 145,
+            "6": 75,
+            "7": 90,
+            "8": 110,
+            "9": 38
+          },
+          "senderTimestamp": {
+            "low": 1786196304,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyHash": {
+            "0": 221,
+            "1": 84,
+            "2": 70,
+            "3": 166,
+            "4": 175,
+            "5": 217,
+            "6": 89,
+            "7": 82,
+            "8": 140,
+            "9": 86
+          },
+          "senderKeyIndexes": [],
+          "recipientTimestamp": {
+            "low": 1786298587,
+            "high": 0,
+            "unsigned": true
+          },
+          "recipientKeyIndexes": []
+        },
+        "deviceListMetadataVersion": 2
+      }
+    },
+    "pushName": "Cliente Teste 2",
+    "instanceId": "00000000-0000-0000-0000-000000000000",
+    "messageType": "conversation",
+    "messageTimestamp": 1786327853
+  },
+  "event": "messages.upsert",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T23:10:53.873Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

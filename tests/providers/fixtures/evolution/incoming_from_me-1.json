@@ -1,0 +1,44 @@
+{
+  "data": {
+    "key": {
+      "id": "3AA97459A5FEC29DF448",
+      "fromMe": true,
+      "remoteJid": "5511999990006@s.whatsapp.net",
+      "participant": "",
+      "remoteJidAlt": "5511999990006@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "source": "ios",
+    "status": "SERVER_ACK",
+    "message": {
+      "conversation": "documento retorno processo pedido entrega pagamento endereco reuniao seguimos aguardo revisar conversa assunto detalhe combinado positivo agenda cliente suporte duvida produto anexo contrato valor consulta atendimento confirmar horario disponivel obrigado equipe proposta documento retorno processo pedido entrega pagamento endereco reuniao seguimos aguardo revisar conversa assunto detalhe combinado positivo agenda cliente suporte duvida produto anexo contrato valor consulta atendimento confirmar horari"
+    },
+    "pushName": "Cliente Teste 3",
+    "instanceId": "00000000-0000-0000-0000-000000000000",
+    "contextInfo": {
+      "expiration": 0,
+      "mentionedJid": [],
+      "groupMentions": [],
+      "disappearingMode": {
+        "trigger": 1,
+        "initiator": 0,
+        "initiatedByMe": false
+      },
+      "statusAttributions": [],
+      "ephemeralSettingTimestamp": {
+        "low": 1784592964,
+        "high": 0,
+        "unsigned": false
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1786309087
+  },
+  "event": "messages.upsert",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T17:58:07.988Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

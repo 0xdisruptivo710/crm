@@ -1,0 +1,94 @@
+[
+  {
+    "file": "connection_update-1.json",
+    "kind": "connection_update"
+  },
+  {
+    "file": "connection_update-2.json",
+    "kind": "connection_update"
+  },
+  {
+    "file": "incoming_audio-1.json",
+    "kind": "incoming_audio"
+  },
+  {
+    "file": "incoming_audio-2.json",
+    "kind": "incoming_audio"
+  },
+  {
+    "file": "incoming_document-1.json",
+    "kind": "incoming_document"
+  },
+  {
+    "file": "incoming_from_me-1.json",
+    "kind": "incoming_from_me"
+  },
+  {
+    "file": "incoming_from_me-2.json",
+    "kind": "incoming_from_me"
+  },
+  {
+    "file": "incoming_from_me-3.json",
+    "kind": "incoming_from_me"
+  },
+  {
+    "file": "incoming_image-1.json",
+    "kind": "incoming_image"
+  },
+  {
+    "file": "incoming_image-2.json",
+    "kind": "incoming_image"
+  },
+  {
+    "file": "incoming_image-3.json",
+    "kind": "incoming_image"
+  },
+  {
+    "file": "incoming_reaction-1.json",
+    "kind": "incoming_reaction"
+  },
+  {
+    "file": "incoming_reply-1.json",
+    "kind": "incoming_reply"
+  },
+  {
+    "file": "incoming_reply-2.json",
+    "kind": "incoming_reply"
+  },
+  {
+    "file": "incoming_special-1.json",
+    "kind": "incoming_special"
+  },
+  {
+    "file": "incoming_special-2.json",
+    "kind": "incoming_special"
+  },
+  {
+    "file": "incoming_text-1.json",
+    "kind": "incoming_text"
+  },
+  {
+    "file": "incoming_text-2.json",
+    "kind": "incoming_text"
+  },
+  {
+    "file": "incoming_text-3.json",
+    "kind": "incoming_text"
+  },
+  {
+    "file": "send_message_echo-1.json",
+    "kind": "send_message_echo"
+  },
+  {
+    "file": "status_update-1.json",
+    "kind": "status_update"
+  },
+  {
+    "file": "status_update-2.json",
+    "kind": "status_update"
+  },
+  {
+    "file": "status_update-3.json",
+    "kind": "status_update"
+  }
+]

@@ -1,0 +1,43 @@
+{
+  "data": {
+    "key": {
+      "id": "3EB0E11F092A307C840CE1",
+      "fromMe": true,
+      "remoteJid": "5511999990006@s.whatsapp.net",
+      "participant": "",
+      "remoteJidAlt": "5511999990006@s.whatsapp.net",
+      "addressingMode": "lid"
+    },
+    "source": "web",
+    "status": "SERVER_ACK",
+    "message": {
+      "conversation": "proposta do"
+    },
+    "pushName": "Cliente Teste 3",
+    "instanceId": "00000000-0000-0000-0000-000000000000",
+    "contextInfo": {
+      "mentionedJid": [],
+      "groupMentions": [],
+      "disappearingMode": {
+        "trigger": 1,
+        "initiator": 0,
+        "initiatedByMe": true
+      },
+      "statusAttributions": [],
+      "ephemeralSettingTimestamp": {
+        "low": 1784592964,
+        "high": 0,
+        "unsigned": false
+      }
+    },
+    "messageType": "conversation",
+    "messageTimestamp": 1786327058
+  },
+  "event": "messages.upsert",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "sender": "5511999990005@s.whatsapp.net",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T22:57:38.305Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}

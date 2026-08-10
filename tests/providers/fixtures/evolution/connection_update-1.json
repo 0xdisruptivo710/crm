@@ -1,0 +1,13 @@
+{
+  "data": {
+    "state": "connecting",
+    "instance": "aios-pocket-fixture",
+    "statusReason": 200
+  },
+  "event": "connection.update",
+  "apikey": "00000000-0000-0000-0000-000000000000",
+  "instance": "aios-pocket-fixture",
+  "date_time": "2026-08-09T22:59:48.470Z",
+  "server_url": "https://evolution.exemplo.invalido",
+  "destination": "https://fixture.invalido/webhooks/evolution/00000000-0000-0000-0000-000000000000"
+}
