@@ -230,7 +230,9 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
     })
 
     const reenqueueSpy = vi.spyOn(messageSendQueue, 'add')
-    await reconcileStuckMessages()
+    // `{ companyId }` escopa a varredura à fixture deste arquivo — protege o banco de dev
+    // compartilhado de efeitos colaterais entre suítes (fold da re-review T11 round 2).
+    await reconcileStuckMessages({ companyId })
     const reenqueued = reenqueueSpy.mock.calls.some(
       (call) => (call[1] as { messageId?: string } | undefined)?.messageId === message!.id,
     )
@@ -298,16 +300,55 @@ describe('sendQueuedMessage (worker `message-send` — máquina de estados, ADR-
     addSpy.mockRestore()
   })
 
-  it('reentrada com state ainda `sending` (simula recuperação de job "stalled" do BullMQ, que NÃO incrementa attemptsMade): nunca reenvia — fica presa até a varredura decidir (achado CRÍTICO da re-review T11)', async () => {
+  it('reentrada com state ainda `sending` (simula recuperação de job "stalled" do BullMQ ou retry pós-falha): lança UnrecoverableError — nunca reenvia, e o job termina JÁ em vez de "completar" em silêncio (achado CRÍTICO da re-review T11 round 2)', async () => {
     const message = await createMessage({ state: 'sending', text: 'travada em sending' })
     const callsBefore = sendTextCalls.length
 
-    await sendQueuedMessage(message.id, companyId)
+    // Antes do fix: isto retornava void, o que faria o BullMQ real considerar o job
+    // COMPLETO com sucesso (nenhum throw) — o evento `failed` nunca dispararia e
+    // markSendFailed ficaria inalcançável com `attempts: 3` (config de produção). Agora
+    // lança, forçando o job a terminar imediatamente como falho.
+    await expect(sendQueuedMessage(message.id, companyId)).rejects.toThrow(
+      'estado incerto: reentrada em sending (stall ou retry pos-falha) — sem reenvio automatico',
+    )
 
     expect(sendTextCalls.length).toBe(callsBefore) // NUNCA chama o provider de novo
     const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
-    expect(after?.state).toBe('sending') // continua presa — resolvida só pela varredura de 10min
+    expect(after?.state).toBe('sending') // o lançamento não muda o estado por si só — quem termina é o handler `failed`
   })
+
+  it('integração real: reentrada em sending com `attempts: 3` (config de PRODUÇÃO) ainda termina no 1º evento "failed" — UnrecoverableError ignora as tentativas restantes (achado CRÍTICO da re-review T11 round 2)', async () => {
+    const message = await createMessage({ state: 'sending', text: 'presa desde uma tentativa anterior' })
+
+    const worker = startSendWorker()
+    try {
+      const failedEvent = new Promise<void>((resolve, reject) => {
+        worker.on('failed', (job) => {
+          if (job?.data?.messageId === message.id) resolve()
+        })
+        worker.on('error', reject)
+      })
+
+      // attempts:3 — a MESMA config da rota real (routes/messages.ts). Sem o fix, o job
+      // "completaria" silenciosamente já na 1ª tentativa (CAS acha count=0, retornava sem
+      // lançar) e a Message ficaria presa em `sending` sem NENHUM evento disparar —
+      // inalcançável até a próxima varredura periódica, minutos depois.
+      await messageSendQueue.add('send', { messageId: message.id, companyId }, { jobId: message.id, attempts: 3 })
+
+      await failedEvent
+
+      const after = await waitFor(async () => {
+        const m = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+        return m?.state === 'failed' ? m : null
+      })
+      expect(after?.state).toBe('failed')
+      expect(after?.failReason).toContain('estado incerto: reentrada em sending')
+    } finally {
+      await worker.close()
+      const job = await messageSendQueue.getJob(message.id)
+      await job?.remove()
+    }
+  }, 20000)
 
   it('corrida do eco no CAS final: eco processado ANTES da atualização sending→sent (mesmo providerMessageId) não lança — a linha do eco vence, a linha original órfã é removida (achado IMPORTANT da re-review T11)', async () => {
     const message = await createMessage({ text: 'vai colidir com o eco' })
@@ -466,7 +507,7 @@ describe('varredura de reconciliação: Message presa em `sending` (achado CRÍT
       data: { createdAt: new Date(Date.now() - 11 * 60 * 1000) },
     })
 
-    await reconcileStuckMessages()
+    await reconcileStuckMessages({ companyId })
 
     const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
     expect(after?.state).toBe('failed')
@@ -476,6 +517,30 @@ describe('varredura de reconciliação: Message presa em `sending` (achado CRÍT
       where: { customerId, type: 'message_send_failed', correlationId: after?.correlationId },
     })
     expect(timeline).not.toBeNull()
+  })
+
+  it('NÃO marca failed uma Message `sending` cujo job ainda está ativo/pendente na fila — mesmo com createdAt aparentando velho (corrida da varredura consigo mesma, achado CRÍTICO da re-review T11 round 2, item 2b)', async () => {
+    const message = await createMessage({ state: 'sending', text: 'sending mas com job ainda vivo na fila' })
+    // createdAt "velho" simula uma linha que ficou MUITO tempo `queued` antes de
+    // finalmente ser pega por um worker — sem a exclusão, pareceria uma `sending` órfã.
+    await prismaUnsafe.message.update({
+      where: { id: message.id },
+      data: { createdAt: new Date(Date.now() - 11 * 60 * 1000) },
+    })
+
+    // Job ainda "vivo" na fila (delayed) para o MESMO jobId=messageId — simula um envio
+    // GENUINAMENTE em andamento (ou prestes a rodar), não órfão.
+    await messageSendQueue.add('send', { messageId: message.id, companyId }, { jobId: message.id, delay: 60_000 })
+
+    try {
+      await reconcileStuckMessages({ companyId })
+
+      const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+      expect(after?.state).toBe('sending') // NÃO marcada failed — o job ainda está na fila
+    } finally {
+      const job = await messageSendQueue.getJob(message.id)
+      await job?.remove()
+    }
   })
 })
 

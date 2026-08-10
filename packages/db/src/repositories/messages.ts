@@ -14,16 +14,20 @@ import { prismaUnsafe } from '../unsafe.js'
 const STUCK_ROW_LIMIT = 500
 
 export const messagesRepo = {
-  findStuckQueued(olderThan: Date) {
+  // `companyId` opcional (fold da re-review T11 round 2): a chamada de PRODUÇÃO (subida
+  // do worker, varredura periódica) nunca passa filtro — precisa varrer TODAS as
+  // companies. Testes passam `companyId` para escopar a varredura à própria fixture,
+  // protegendo o banco de dev compartilhado de efeitos colaterais entre suítes.
+  findStuckQueued(olderThan: Date, companyId?: string) {
     return prismaUnsafe.message.findMany({
-      where: { state: 'queued', createdAt: { lt: olderThan } },
+      where: { state: 'queued', createdAt: { lt: olderThan }, ...(companyId ? { companyId } : {}) },
       select: { id: true, companyId: true },
       take: STUCK_ROW_LIMIT,
     })
   },
-  findStuckSending(olderThan: Date) {
+  findStuckSending(olderThan: Date, companyId?: string) {
     return prismaUnsafe.message.findMany({
-      where: { state: 'sending', createdAt: { lt: olderThan } },
+      where: { state: 'sending', createdAt: { lt: olderThan }, ...(companyId ? { companyId } : {}) },
       select: { id: true, companyId: true },
       take: STUCK_ROW_LIMIT,
     })

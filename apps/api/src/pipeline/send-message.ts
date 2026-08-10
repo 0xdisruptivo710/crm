@@ -1,3 +1,4 @@
+import { UnrecoverableError } from 'bullmq'
 import { companiesRepo, prisma, runWithTenant } from '@aios-pocket/db'
 import { providerForCompany } from '../provider-factory.js'
 import { publishDomainEvent } from '../queue/events.js'
@@ -27,19 +28,30 @@ export async function sendQueuedMessage(messageId: string, companyId: string): P
       // removido o heurístico anterior baseado em `job.attemptsMade` (achado CRÍTICO da
       // re-review T11, verificado contra o Lua/JS do bullmq@5.81.3): a recuperação de um
       // job "stalled" pelo BullMQ NÃO incrementa attemptsMade, então um job recuperado
-      // reprocessava aqui com state=`sending` e attemptsMade=0 — o heurístico antigo
-      // classificava isso como "duplicado", devolvia sem lançar, e o BullMQ marcava o job
-      // como COMPLETED com a Message presa em `sending` para sempre, em silêncio. Sem
-      // como distinguir com certeza "retry legítimo" de "stalled" de "duplicata" só pelo
-      // estado da linha, a única postura segura é: se já saiu de `queued`, nunca reenviar
-      // (não há como saber se a chamada ao provider da tentativa anterior já foi ou não
-      // disparada de verdade — reenviar arriscaria um envio real duplicado ao cliente).
-      // Uma linha presa em `sending` fica visível e é resolvida pela varredura de
-      // reconciliação da subida do worker (queue/send-worker.ts) depois de 10 minutos —
-      // nunca silêncio, nunca reenvio automático.
-      const exists = await prisma.message.findFirst({ where: { id: messageId }, select: { id: true } })
-      if (!exists) throw new Error(`message não encontrada: ${messageId}`)
-      return
+      // reprocessava aqui com state=`sending` e attemptsMade=0. Não há como saber com
+      // certeza se a chamada ao provider da tentativa anterior já foi ou não disparada de
+      // verdade — reenviar arriscaria um envio real duplicado ao cliente. Por isso NUNCA
+      // reenviamos a partir daqui.
+      const current = await prisma.message.findFirst({ where: { id: messageId }, select: { id: true, state: true } })
+      if (!current) throw new Error(`message não encontrada: ${messageId}`)
+      if (current.state === 'sending') {
+        // CRÍTICO (achado da re-review T11 round 2): com `attempts: 3` configurado na
+        // rota, simplesmente RETORNAR aqui (sem lançar) faz o BullMQ considerar esta
+        // tentativa um SUCESSO — o job vai para `completed`, o evento `failed` NUNCA
+        // dispara, e `markSendFailed` fica INALCANÇÁVEL na configuração real de produção;
+        // a Message ficava presa em `sending` em silêncio até a próxima varredura
+        // periódica (minutos depois, na melhor das hipóteses). `UnrecoverableError` força
+        // o BullMQ a tratar isto como terminal JÁ (shouldRetryJob bloqueia retry para esse
+        // tipo de erro, veja job.js do bullmq — ver comentário de handleSendFailed em
+        // queue/send-worker.ts), sem nenhuma tentativa adicional de reenvio: o evento
+        // `failed` dispara imediatamente, `job.isFailed()` confirma terminal, e
+        // `handleSendFailed` marca `failed` + `failReason` em segundos — nunca em minutos,
+        // e ainda com risco zero de reenvio.
+        throw new UnrecoverableError(
+          'estado incerto: reentrada em sending (stall ou retry pos-falha) — sem reenvio automatico',
+        )
+      }
+      return // já sent ou failed — terminal de verdade, no-op idempotente
     }
 
     const message = await prisma.message.findFirst({
@@ -59,13 +71,15 @@ export async function sendQueuedMessage(messageId: string, companyId: string): P
 
     const provider = providerForCompany(company)
 
-    // Falha do provider PROPAGA (throw): o BullMQ tenta de novo só se o erro acontecer
-    // ANTES da transição queued→sending ter sido persistida (ver comentário acima) —
-    // depois dela, qualquer retry é um no-op por design. Falha NUNCA silenciosa: o
-    // handler `worker.on('failed', ...)` de queue/send-worker.ts confirma via
-    // `job.isFailed()` (não por attemptsMade — outro achado da re-review T11, ver
-    // comentário lá) quando o job realmente terminou, e a varredura de reconciliação
-    // cobre qualquer linha presa em `sending` que nenhum evento resolveu.
+    // Falha do provider PROPAGA (throw): `attempts: 3` (queue/queues.ts) só protege a
+    // janela ANTES desta chamada — se `provider.sendText` lançar aqui, o BullMQ agenda uma
+    // 2ª tentativa, mas ela encontra a guarda de reentrada acima (`state === 'sending'`) e
+    // lança `UnrecoverableError` na hora, terminando o job sem NUNCA chamar `sendText` de
+    // novo (única tentativa real de envio por Message). Falha NUNCA silenciosa: o handler
+    // `worker.on('failed', ...)` de queue/send-worker.ts confirma via `job.isFailed()`
+    // (não por attemptsMade — achado da re-review T11) quando o job realmente terminou, e
+    // a varredura periódica cobre qualquer linha presa em `sending` que nenhum evento
+    // resolveu (crash do próprio processo antes do job conseguir emitir `failed`).
     const result = await provider.sendText(customer.phoneE164.replace('+', ''), message.text ?? '')
 
     try {
@@ -85,6 +99,15 @@ export async function sendQueuedMessage(messageId: string, companyId: string): P
       // então descartamos esta linha original (órfã: ainda `sending`, providerMessageId
       // NULL) em vez de propagar o erro. Sucesso de verdade: a mensagem chegou ao
       // cliente, só não é esta linha que registra isso.
+      //
+      // LIMITAÇÃO DOCUMENTADA (fold da re-review T11): o `messageId` que a rota devolveu
+      // no 202 agora resolve para NADA (a linha foi apagada) — quem chamou POST /messages
+      // não tem como, hoje, encontrar de volta "sua" mensagem enviada; a linha do eco tem
+      // um `correlationId` PRÓPRIO (gerado pelo pipeline inbound, não o da requisição
+      // original), e a timeline registrada é `message_sent_from_phone` (T10) — como se o
+      // humano tivesse mandado pelo celular, não pela API. A correção de verdade exige que
+      // `packages/contracts` ganhe uma resposta com id ESTÁVEL/rastreável entre requisição
+      // e linha final (fora do escopo desta rodada de fix — ver DEFERRED no report).
       await prisma.message.deleteMany({ where: { id: messageId, state: 'sending', providerMessageId: null } })
       return
     }

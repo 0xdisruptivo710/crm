@@ -21,14 +21,30 @@ interface SendJobData {
 const QUEUED_STUCK_MS = 5 * 60 * 1000
 const SENDING_STUCK_MS = 10 * 60 * 1000
 
+// Achado IMPORTANT da re-review T11 round 2: a varredura precisa se repetir — rodar só na
+// subida do processo deixava qualquer `sending` presa DEPOIS do boot silenciosa até o
+// próximo restart. 5min: mesma ordem de grandeza da janela de "queued órfã" (não precisa
+// ser mais fina que isso; a Message só termina presa por minutos, nunca por horas).
+const SWEEP_INTERVAL_MS = 5 * 60 * 1000
+
 export function startSendWorker(): Worker {
+  // autorun:false — CRÍTICO (achado da re-review T11 round 2, item 2): sem isso, o Worker
+  // já começaria a puxar jobs da fila ENQUANTO a varredura de boot (linha abaixo) ainda
+  // está rodando. O PRÓPRIO reenfileiramento de uma `queued` órfã (sweep i) podia ser
+  // pego e processado pelo worker (virando `sending` de verdade, envio em voo) enquanto a
+  // MESMA chamada de reconcileStuckMessages ainda varria `sending` presas (sweep ii,
+  // filtrado só por `createdAt`) — uma corrida da varredura consigo mesma que marcava
+  // `failed` um envio genuinamente em andamento, descartando o providerMessageId real
+  // quando o eco chegasse depois. `worker.run()` só é chamado DEPOIS do `await` da
+  // varredura terminar (via `.finally`), garantindo a ordem mesmo sem o chamador de
+  // startSendWorker() esperar essa promise.
   const worker = new Worker(
     QUEUE.messageSend,
     async (job) => {
       const { messageId, companyId } = job.data as SendJobData
       await sendQueuedMessage(messageId, companyId)
     },
-    { connection: redisWorkerConnection },
+    { connection: redisWorkerConnection, autorun: false },
   )
 
   // Falha NUNCA silenciosa (regra do CLAUDE.md §4). `handleSendFailed` confirma que o job
@@ -39,13 +55,41 @@ export function startSendWorker(): Worker {
     })
   })
 
-  // Roda uma vez na subida do processo — não é um cron, é a rede de segurança do restart
-  // (mesmo padrão de reconcileUnprocessedWebhooks em webhook-worker.ts).
-  reconcileStuckMessages().catch((err: unknown) => {
-    console.error('[send worker] falha ao reconciliar mensagens presas', err)
-  })
+  void reconcileStuckMessages()
+    .catch((err: unknown) => {
+      console.error('[send worker] falha ao reconciliar mensagens presas na subida', err)
+    })
+    .finally(() => {
+      void worker.run()
+    })
+
+  schedulePeriodicSweep(worker)
 
   return worker
+}
+
+// Varredura periódica (achado IMPORTANT da re-review T11 round 2, item 3): a varredura de
+// boot sozinha deixava qualquer `sending` presa DEPOIS da subida do processo invisível até
+// o próximo restart. `setInterval` com `.unref()` (não impede o processo de encerrar —
+// importante em testes e em shutdown gracioso) e uma guarda de reentrância simples
+// (booleano): se uma rodada ainda está em andamento quando o timer dispara de novo
+// (varredura lenta contra o Postgres remoto, ou muitas linhas presas), pula esta rodada em
+// vez de empilhar chamadas concorrentes. Encerrada junto do worker via o evento `closing`.
+function schedulePeriodicSweep(worker: Worker): void {
+  let sweeping = false
+  const timer = setInterval(() => {
+    if (sweeping) return
+    sweeping = true
+    reconcileStuckMessages()
+      .catch((err: unknown) => {
+        console.error('[send worker] falha na varredura periódica de mensagens presas', err)
+      })
+      .finally(() => {
+        sweeping = false
+      })
+  }, SWEEP_INTERVAL_MS)
+  timer.unref()
+  worker.on('closing', () => clearInterval(timer))
 }
 
 // Handler do evento `failed` do Worker, extraído para ser testável diretamente (achado
@@ -66,7 +110,9 @@ export function startSendWorker(): Worker {
 // (moveStalledJobsToWait-9.lua: "job stalled more than allowable limit"). A checagem
 // correta e documentada é `job.isFailed()` — consulta direta ao Redis se o job está no
 // ZSET `failed` (terminal de verdade) — o MESMO padrão já usado neste repo em
-// webhook-worker.ts (`existing.isFailed()`).
+// webhook-worker.ts (`existing.isFailed()`). O mesmo `UnrecoverableError` é lançado de
+// propósito por sendQueuedMessage numa reentrada em `sending` (achado CRÍTICO da re-review
+// T11 round 2) — o efeito é o mesmo: terminal já, `isFailed()` verdadeiro na hora.
 export async function handleSendFailed(job: Job | undefined, err: Error): Promise<void> {
   if (!job) return
   const terminal = await job.isFailed()
@@ -94,21 +140,47 @@ async function reenqueueSend(message: StuckMessage): Promise<void> {
   )
 }
 
+// Achado CRÍTICO da re-review T11 round 2, item 2(b): sem este filtro, uma linha que
+// ACABOU de virar `sending` de verdade (envio genuinamente em voo AGORA) podia ter
+// `createdAt` mais velho que SENDING_STUCK_MS (ficou `queued` muito tempo antes de
+// finalmente ser pega por um worker) e seria marcada `failed` por engano pela varredura —
+// descartando o providerMessageId real quando o eco da Evolution chegasse depois. Consulta
+// o BullMQ diretamente: se o jobId (= messageId) ainda está active/waiting/delayed, o
+// envio está genuinamente em andamento (ou prestes a rodar) — não é órfão.
+async function excludeInFlight(rows: StuckMessage[]): Promise<StuckMessage[]> {
+  if (rows.length === 0) return rows
+  const inFlight = await messageSendQueue.getJobs(['active', 'waiting', 'delayed'])
+  const inFlightIds = new Set(inFlight.map((job) => job.id))
+  return rows.filter((row) => !inFlightIds.has(row.id))
+}
+
 // Varredura de reconciliação (achado CRÍTICO/IMPORTANT da re-review T11, itens 1 e 5):
 // cobre tanto o `queued` órfão (enqueue da rota falhou — item 5) quanto o `sending` preso
 // (job "stalled"/crash entre a transição e a confirmação do provider — item 1). Exportada
 // para ser chamada diretamente em teste, como reconcileUnprocessedWebhooks.
-export async function reconcileStuckMessages(): Promise<{ requeued: number; failed: number }> {
+//
+// `filter?.companyId` (fold da re-review T11 round 2, item 4c): a chamada de PRODUÇÃO
+// (startSendWorker, acima) nunca passa filtro — precisa varrer TODAS as companies. Testes
+// passam `companyId` para escopar a varredura à própria fixture, protegendo o banco de
+// dev compartilhado de efeitos colaterais entre suítes.
+export async function reconcileStuckMessages(filter?: { companyId?: string }): Promise<{
+  requeued: number
+  failed: number
+}> {
   let requeued = 0
   let failed = 0
 
-  const stuckQueued = await messagesRepo.findStuckQueued(new Date(Date.now() - QUEUED_STUCK_MS))
+  const stuckQueued = await messagesRepo.findStuckQueued(new Date(Date.now() - QUEUED_STUCK_MS), filter?.companyId)
   for (const message of stuckQueued) {
     await reenqueueSend(message)
     requeued += 1
   }
 
-  const stuckSending = await messagesRepo.findStuckSending(new Date(Date.now() - SENDING_STUCK_MS))
+  const stuckSendingRaw = await messagesRepo.findStuckSending(
+    new Date(Date.now() - SENDING_STUCK_MS),
+    filter?.companyId,
+  )
+  const stuckSending = await excludeInFlight(stuckSendingRaw)
   for (const message of stuckSending) {
     // Limitação aceita, documentada (exigência da re-review T11): não há como saber, a
     // esta altura, se o envio real chegou a sair ou não. Se saiu, o eco da Evolution (a

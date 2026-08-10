@@ -33,6 +33,12 @@ export const WEBHOOK_JOB_RETRY_OPTIONS = {
 // reconciliação de mensagens presas (queue/send-worker.ts, achado IMPORTANT da re-review
 // T11 — item 5): as duas precisam enfileirar `message-send` com as MESMAS opções,
 // nunca duas definições divergentes (regra do CLAUDE.md §4).
+// removeOnFail fica DE PROPÓSITO sem valor (mesmo raciocínio de WEBHOOK_JOB_RETRY_OPTIONS
+// acima): um job `failed` é o sinal que `reenqueueSend` usa para saber que precisa
+// remover o job morto antes de reenfileirar com o mesmo jobId — se removêssemos o job
+// automaticamente ao falhar, a varredura nunca saberia que aquele jobId estava "sujo" e o
+// `.add()` idempotente do BullMQ ficaria mudo (ignora silenciosamente um add com jobId
+// repetido enquanto o job antigo, ainda vivo, existir).
 export const MESSAGE_SEND_JOB_RETRY_OPTIONS = {
   attempts: 3,
   backoff: { type: 'exponential', delay: 2000 },
