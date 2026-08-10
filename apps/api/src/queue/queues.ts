@@ -15,11 +15,14 @@ export const domainEventsQueue = new Queue(QUEUE.domainEvents, { connection: red
 // Compartilhado entre a rota (T6) e a reconciliação de órfãos (T10, worker de
 // webhook-processing): erro de processamento não marca `processed` (process-webhook.ts)
 // — o job falha e o BullMQ tenta de novo até esgotar as tentativas.
-// removeOnComplete com TTL >> a janela de reconciliação (60s): mantém o jobId vivo
-// tempo suficiente para o dedupe de publishDomainEvent/reenqueue funcionar de verdade,
-// mas não para sempre (achado IMPORTANT da revisão T10 — antes, jobs completos nunca
-// expiravam). removeOnFail fica DE PROPÓSITO sem valor: um job falho é o sinal que a
-// reconciliação usa para saber que precisa remover e re-dirigir (ver webhook-worker.ts).
+// removeOnComplete com TTL >> a janela de reconciliação (60s): mantém o jobId (=raw.id)
+// vivo tempo suficiente para o dedupe do PRÓPRIO enqueue de webhook-processing (rota E
+// reconciliação usam o mesmo jobId=raw.id) funcionar de verdade, mas não para sempre
+// (achado IMPORTANT da revisão T10 — antes, jobs completos nunca expiravam). CORREÇÃO
+// (achado FOLDED da revisão T10 round 2): isto NÃO tem relação com o dedupe de
+// publishDomainEvent — aquele vive na fila domain-events, com seu próprio TTL de 24h
+// (ver queue/events.ts). removeOnFail fica DE PROPÓSITO sem valor: um job falho é o sinal
+// que a reconciliação usa para saber que precisa remover e re-dirigir (webhook-worker.ts).
 export const WEBHOOK_JOB_RETRY_OPTIONS = {
   attempts: 3,
   backoff: { type: 'exponential', delay: 2000 },

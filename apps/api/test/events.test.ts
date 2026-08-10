@@ -73,6 +73,14 @@ describe('eventos de domínio (ADR-0004)', () => {
       await publishDomainEvent(event)
       await completed
 
+      // Grace period curta e limitada: sem isso, o teste "passa" só por ter observado a
+      // PRIMEIRA conclusão — não prova que não havia uma segunda em voo (achado FOLDED da
+      // revisão T10 round 2). Se o dedupe por jobId quebrasse, a segunda publicação teria
+      // virado um job PRÓPRIO, ainda pendente/ativo neste instante.
+      await new Promise((resolve) => setTimeout(resolve, 500))
+      const counts = await domainEventsQueue.getJobCounts('waiting', 'active', 'delayed')
+      expect((counts.waiting ?? 0) + (counts.active ?? 0) + (counts.delayed ?? 0)).toBe(0)
+
       expect(processados).toEqual([event.correlationId])
     },
     20000,

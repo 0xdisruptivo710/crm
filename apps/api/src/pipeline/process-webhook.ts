@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { ConnectionStatusChange, IncomingMessage, MessageStatusUpdate } from '@aios-pocket/contracts'
-import { companiesRepo, getTenant, prisma, runWithTenant } from '@aios-pocket/db'
+import { canonicalizePhone, companiesRepo, getTenant, prisma, runWithTenant } from '@aios-pocket/db'
 import { parseProviderWebhook } from '@aios-pocket/providers'
 import { publishDomainEvent } from '../queue/events.js'
 import { isBlockedFailureAck, nextState } from './apply-status.js'
@@ -23,15 +23,24 @@ type IncomingOutcome = { outcome: 'applied' } | { outcome: 'invalid_phone'; reas
 
 async function handleIncomingMessage(companyId: string, msg: IncomingMessage): Promise<IncomingOutcome> {
   // JIDs "veneno" (status@broadcast, @newsletter, ids curtos etc.) passam pelo parser —
-  // que só filtra grupo/lid — mas não são telefone válido; canonicalizePhone lança. Sem
-  // este catch, o job re-tentava 3x e morria exausto para sempre (achado IMPORTANT da
-  // revisão T10). Tratado como "ignorado com motivo", nunca propagado.
-  let customer
+  // que só filtra grupo/lid (packages/providers) — mas não são telefone válido;
+  // canonicalizePhone lança. Sem este catch, o job re-tentava 3x e morria exausto para
+  // sempre (achado IMPORTANT da revisão T10).
+  //
+  // O catch cobre SÓ esta chamada pura (sem I/O) — achado IMPORTANT da revisão T10 round
+  // 2: um catch mais largo (em volta de resolveCustomer, que faz I/O) transformava
+  // QUALQUER erro de banco (pool esgotado, corrida real, TenantContext ausente) em
+  // "telefone inválido", descartando uma mensagem REAL em silêncio permanente, em vez de
+  // deixar o job falhar e o BullMQ tentar de novo.
+  let canonical
   try {
-    customer = await resolveCustomer(msg.phone)
+    canonical = canonicalizePhone(msg.phone)
   } catch (err) {
     return { outcome: 'invalid_phone', reason: err instanceof Error ? err.message : String(err) }
   }
+
+  // Erros de resolveCustomer (I/O) PROPAGAM daqui pra cima — nenhum catch os intercepta.
+  const customer = await resolveCustomer(canonical)
 
   let conversation = await prisma.conversation.findFirst({
     where: { provider: msg.provider, externalId: msg.conversationExternalId },
@@ -185,20 +194,34 @@ async function handleStatusUpdate(msg: MessageStatusUpdate): Promise<StatusOutco
   // anterior que morreu antes de gravar a timeline (CRÍTICO — achado da revisão T10:
   // antes disso, nextState devolvia null aqui e o evento se perdia para sempre), seja
   // porque outra chamada concorrente aplicou este mesmo ack primeiro. Nos 3 casos a
-  // timeline deveria existir — backfill idempotente por (customerId, type,
-  // correlationId, occurredAt). Se o estado não bateu (regressão de verdade ou corrida
+  // timeline deveria existir. Se o estado não bateu (regressão de verdade ou corrida
   // vencida por outra transição), não há nada a registrar aqui.
   if (currentState !== msg.status) return 'ignored'
 
   const conversation = await prisma.conversation.findFirst({ where: { id: message.conversationId } })
   if (!conversation) return 'applied' // defensivo; não deveria acontecer (FK garante a linha)
 
+  // "previousState" só é conhecível quando FOI ESTA CHAMADA (ou uma corrida concorrente
+  // que partiu do MESMO estado lido por nós) que efetuou a transição — nesse caso
+  // `message.state` (lido antes de qualquer mutação) ainda reflete o valor real anterior.
+  // Quando currentState já chega igual a message.state (nada mudou sob nossa observação:
+  // a transição real aconteceu numa tentativa anterior, já sumida), é um BACKFILL puro —
+  // o valor anterior verdadeiro é incognoscível a partir daqui; mentir com o valor atual
+  // (achado FOLDED da revisão T10 round 2) é pior que admitir null.
+  const isBackfill = message.state === currentState
+
+  // Dedupe da timeline SEM occurredAt na chave (achado FOLDED da revisão T10 round 2):
+  // uma reentrega do provider para o MESMO ack (mesma transição, `date_time`/occurredAt
+  // NOVO) não pode virar uma segunda linha "no-op". A chave real de uma transição é
+  // (Message, estado-alvo) — correlationId já identifica a Message; o filtro por JSON
+  // path em `payload.newState` identifica QUAL transição (sent→delivered e
+  // delivered→read da MESMA mensagem são eventos diferentes, mesmo correlationId).
   const existingTimeline = await prisma.customerEvent.findFirst({
     where: {
       customerId: conversation.customerId,
       type: 'message_status_changed',
       correlationId: message.correlationId,
-      occurredAt: msg.timestamp,
+      payload: { path: ['newState'], equals: currentState },
     },
   })
   if (!existingTimeline) {
@@ -209,7 +232,8 @@ async function handleStatusUpdate(msg: MessageStatusUpdate): Promise<StatusOutco
         type: 'message_status_changed',
         payload: {
           messageId: message.id,
-          previousState: message.state,
+          backfill: isBackfill,
+          previousState: isBackfill ? null : message.state,
           newState: currentState,
           provider: msg.provider,
           providerMessageId: msg.providerMessageId,

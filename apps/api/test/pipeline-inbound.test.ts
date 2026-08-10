@@ -310,14 +310,21 @@ describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline 
     }
   })
 
-  it('caminho negativo CRÍTICO: processamento lança (publish falha) → raw NÃO fica marcado processado; retry seguinte completa (idempotência por passo)', async () => {
+  it('caminho negativo CRÍTICO: processamento lança (publish falha) → raw NÃO fica marcado processado; retry usa o MESMO correlationId e a timeline existe (idempotência por passo de verdade)', async () => {
     const raw = await prismaUnsafe.rawWebhookEvent.create({
       data: { provider: 'evolution', companyId, payload: loadFixture('incoming_text-3') },
     })
 
-    const addSpy = vi.spyOn(domainEventsQueue, 'add').mockRejectedValueOnce(new Error('redis fora do ar (simulado)'))
+    // Spy NÃO restaurado entre as duas tentativas (achado CRÍTICO da revisão T10 round 2:
+    // a versão anterior deste teste usava mockRestore() logo após a 1ª chamada e só
+    // conferia flags/contagem — passava até contra o código PRÉ-fix, porque o branch
+    // antigo de P2002 também deixava processed=false→true e message count=1 no fim,
+    // sem nunca provar que a timeline/o evento de domínio sobreviveram). Mantendo o spy
+    // vivo nas duas chamadas, capturamos o argumento de AMBAS e comparamos.
+    const addSpy = vi.spyOn(domainEventsQueue, 'add')
+    addSpy.mockRejectedValueOnce(new Error('redis fora do ar (simulado)')) // só a 1ª falha
+
     await expect(processRawWebhook(raw.id)).rejects.toThrow('redis fora do ar (simulado)')
-    addSpy.mockRestore()
 
     const afterFailure = await prismaUnsafe.rawWebhookEvent.findUnique({ where: { id: raw.id } })
     // NÃO marcado como processado: o job precisa falhar de verdade para o BullMQ re-tentar
@@ -325,17 +332,77 @@ describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline 
     expect(afterFailure?.processed).toBe(false)
 
     // Message/customerEvent já commitados antes do publish falhar (sem transação cobrindo
-    // os 3 passos) — isso é esperado; o que importa é que o RETRY seguinte reconhece o que
-    // já foi feito (dedupe por P2002 + timeline condicional) e completa sem duplicar nem
-    // perder o evento de domínio.
+    // os 3 passos) — isso é esperado; o retry (2ª chamada de .add(), agora sem mock,
+    // resolve de verdade contra o Redis remoto) reconhece o que já foi feito (dedupe por
+    // P2002 + timeline condicional) e completa sem duplicar nem perder o evento de domínio.
     await processRawWebhook(raw.id)
+    // NÃO restaura o spy ainda — mockRestore() cascateia por mockReset()/mockClear() e
+    // apagaria `mock.calls` antes de inspecionarmos abaixo (bug real cometido nesta mesma
+    // rodada de fix: descoberto ao rodar o teste e ver `calls.length` zerado). O
+    // `afterEach` do arquivo (`vi.restoreAllMocks()`) cuida da limpeza ao final do teste.
+
     const afterRetry = await prismaUnsafe.rawWebhookEvent.findUnique({ where: { id: raw.id } })
     expect(afterRetry?.processed).toBe(true)
     expect(afterRetry?.error).toBeNull()
 
-    const messages = await prismaUnsafe.message.count({
+    const message = await prismaUnsafe.message.findFirst({
       where: { companyId, provider: 'evolution', providerMessageId: '3A245B67166D7896E259' },
     })
-    expect(messages).toBe(1) // sem duplicar apesar do crash no meio do caminho
+    expect(message).not.toBeNull() // sem duplicar apesar do crash no meio do caminho
+
+    // (a) a timeline REALMENTE existe — keyed pelo correlationId estável da Message. Sem
+    // o fix crítico, o P2002 do retry retornava cedo e este registro nunca era criado.
+    const timeline = await prismaUnsafe.customerEvent.findFirst({
+      where: { companyId, type: 'message_received', correlationId: message?.correlationId },
+    })
+    expect(timeline).not.toBeNull()
+
+    // (b) publishDomainEvent foi chamado nas DUAS tentativas com o MESMO correlationId —
+    // é isso que faz o dedupe por jobId (`${name}-${correlationId}`) funcionar de
+    // verdade. Sem o fix, a 1ª tentativa geraria um correlationId (perdido no throw) e a
+    // 2ª geraria OUTRO novo — nunca provando idempotência real, só coincidência de contagem.
+    expect(addSpy.mock.calls.length).toBeGreaterThanOrEqual(2)
+    const firstEvent = addSpy.mock.calls[0]?.[1] as { correlationId?: string } | undefined
+    const secondEvent = addSpy.mock.calls[1]?.[1] as { correlationId?: string } | undefined
+    expect(firstEvent?.correlationId).toBeDefined()
+    expect(secondEvent?.correlationId).toBe(firstEvent?.correlationId)
+    expect(secondEvent?.correlationId).toBe(message?.correlationId)
+  })
+
+  it('JID veneno (status@broadcast): payload sintético — parser deixa passar (só filtra grupo/lid), canonicalizePhone lança → ignorado com motivo, sem lançar, sem criar Customer (achado IMPORTANT da revisão T10)', async () => {
+    // Payload SINTÉTICO mínimo, não uma fixture inventada no diretório compartilhado
+    // (Conventions.md §3.10 proíbe fixture fabricada; isso é um objeto construído inline
+    // para exercitar deliberadamente um caso de borda, prática distinta e explicitamente
+    // aceita pela própria revisão que pediu este teste).
+    const raw = await prismaUnsafe.rawWebhookEvent.create({
+      data: {
+        provider: 'evolution',
+        companyId,
+        payload: {
+          event: 'messages.upsert',
+          date_time: new Date().toISOString(),
+          data: {
+            key: { id: 'POISON-JID-BROADCAST-1', fromMe: false, remoteJid: 'status@broadcast' },
+            message: { conversation: 'atualização de status' },
+            messageType: 'conversation',
+            messageTimestamp: Math.floor(Date.now() / 1000),
+          },
+        },
+      },
+    })
+
+    await expect(processRawWebhook(raw.id)).resolves.toBeUndefined() // nunca lança
+
+    const after = await prismaUnsafe.rawWebhookEvent.findUnique({ where: { id: raw.id } })
+    expect(after?.processed).toBe(true)
+    expect(after?.error).toMatch(/^telefone inválido/)
+
+    const created = await prismaUnsafe.customer.findFirst({ where: { companyId, phoneOriginal: 'status' } })
+    expect(created).toBeNull() // nenhum Customer fantasma criado a partir de "status@broadcast"
+
+    const message = await prismaUnsafe.message.findFirst({
+      where: { companyId, provider: 'evolution', providerMessageId: 'POISON-JID-BROADCAST-1' },
+    })
+    expect(message).toBeNull() // pipeline parou antes de chegar no insert de Message
   })
 })
