@@ -4,7 +4,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { prismaUnsafe } from '@aios-pocket/db/testing'
 import { processRawWebhook } from '../src/pipeline/process-webhook.js'
 import { reconcileUnprocessedWebhooks } from '../src/queue/webhook-worker.js'
-import { webhookProcessingQueue } from '../src/queue/queues.js'
+import { domainEventsQueue, webhookProcessingQueue } from '../src/queue/queues.js'
 
 // Suíte de integração real: banco e Redis são remotos (droplet de dev) — o custo de
 // conexão a frio da fila BullMQ (primeiro publishDomainEvent do processo) já estourou
@@ -230,5 +230,112 @@ describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline 
     expect(reenqueued).toBe(true)
 
     await prismaUnsafe.rawWebhookEvent.deleteMany({ where: { id: raw.id } })
+  })
+
+  it('reconcileUnprocessedWebhooks remove um job FALHO (esgotado) antes de reenfileirar com o mesmo jobId (achado IMPORTANT da revisão T10)', async () => {
+    const raw = await prismaUnsafe.rawWebhookEvent.create({
+      data: { provider: 'evolution', companyId, payload: loadFixture('connection_update-1') },
+    })
+    await prismaUnsafe.rawWebhookEvent.update({
+      where: { id: raw.id },
+      data: { receivedAt: new Date(Date.now() - 120_000) },
+    })
+
+    // Sem isso, o BullMQ ignora silenciosamente um `.add()` com jobId repetido enquanto o
+    // job antigo (falho, esgotou as 3 tentativas) ainda existir — a reconciliação nunca
+    // re-dirigiria um job morto. `getJob`/`isFailed`/`remove` mockados: nível de mock
+    // explicitamente aceito para este achado (equivalente ao teste de reconciliação acima).
+    const removeSpy = vi.fn().mockResolvedValue(undefined)
+    const fakeFailedJob = { isFailed: vi.fn().mockResolvedValue(true), remove: removeSpy }
+    const getJobSpy = vi.spyOn(webhookProcessingQueue, 'getJob').mockResolvedValue(fakeFailedJob as never)
+    const addSpy = vi.spyOn(webhookProcessingQueue, 'add').mockResolvedValue({} as never)
+
+    await reconcileUnprocessedWebhooks()
+
+    expect(getJobSpy).toHaveBeenCalledWith(raw.id)
+    expect(removeSpy).toHaveBeenCalled() // job falho removido ANTES do re-add
+    const reenqueued = addSpy.mock.calls.some((call) => (call[1] as { rawEventId?: string } | undefined)?.rawEventId === raw.id)
+    expect(reenqueued).toBe(true)
+
+    await prismaUnsafe.rawWebhookEvent.deleteMany({ where: { id: raw.id } })
+  })
+
+  it('isolamento entre companies: a MESMA fixture ingerida por duas companies cria Customer/Conversation/Message SEPARADOS, sem cross-link', async () => {
+    const companyA = await prismaUnsafe.company.create({
+      data: { name: `Pipeline Isolamento A ${Date.now()}`, activeProvider: 'evolution', providerCredentials: 'cifrado' },
+    })
+    const companyB = await prismaUnsafe.company.create({
+      data: { name: `Pipeline Isolamento B ${Date.now()}`, activeProvider: 'evolution', providerCredentials: 'cifrado' },
+    })
+    try {
+      const fixture = loadFixture('incoming_image-2') // fixture real, não usada em outro teste deste arquivo
+      const rawA = await prismaUnsafe.rawWebhookEvent.create({
+        data: { provider: 'evolution', companyId: companyA.id, payload: fixture },
+      })
+      const rawB = await prismaUnsafe.rawWebhookEvent.create({
+        data: { provider: 'evolution', companyId: companyB.id, payload: fixture },
+      })
+
+      await processRawWebhook(rawA.id)
+      await processRawWebhook(rawB.id)
+
+      const customersA = await prismaUnsafe.customer.findMany({ where: { companyId: companyA.id } })
+      const customersB = await prismaUnsafe.customer.findMany({ where: { companyId: companyB.id } })
+      expect(customersA).toHaveLength(1)
+      expect(customersB).toHaveLength(1)
+      expect(customersA[0]?.id).not.toBe(customersB[0]?.id) // mesmo telefone, Customer DIFERENTE por company
+
+      const conversationsA = await prismaUnsafe.conversation.findMany({ where: { companyId: companyA.id } })
+      const conversationsB = await prismaUnsafe.conversation.findMany({ where: { companyId: companyB.id } })
+      expect(conversationsA).toHaveLength(1)
+      expect(conversationsB).toHaveLength(1)
+      expect(conversationsA[0]?.customerId).toBe(customersA[0]?.id) // sem cross-link entre companies
+      expect(conversationsB[0]?.customerId).toBe(customersB[0]?.id)
+
+      const messagesA = await prismaUnsafe.message.findMany({ where: { companyId: companyA.id } })
+      const messagesB = await prismaUnsafe.message.findMany({ where: { companyId: companyB.id } })
+      expect(messagesA).toHaveLength(1)
+      expect(messagesB).toHaveLength(1)
+      expect(messagesA[0]?.conversationId).toBe(conversationsA[0]?.id)
+      expect(messagesB[0]?.conversationId).toBe(conversationsB[0]?.id)
+    } finally {
+      for (const id of [companyA.id, companyB.id]) {
+        await prismaUnsafe.customerEvent.deleteMany({ where: { companyId: id } })
+        await prismaUnsafe.message.deleteMany({ where: { companyId: id } })
+        await prismaUnsafe.conversation.deleteMany({ where: { companyId: id } })
+        await prismaUnsafe.customer.deleteMany({ where: { companyId: id } })
+        await prismaUnsafe.rawWebhookEvent.deleteMany({ where: { companyId: id } })
+        await prismaUnsafe.company.deleteMany({ where: { id } })
+      }
+    }
+  })
+
+  it('caminho negativo CRÍTICO: processamento lança (publish falha) → raw NÃO fica marcado processado; retry seguinte completa (idempotência por passo)', async () => {
+    const raw = await prismaUnsafe.rawWebhookEvent.create({
+      data: { provider: 'evolution', companyId, payload: loadFixture('incoming_text-3') },
+    })
+
+    const addSpy = vi.spyOn(domainEventsQueue, 'add').mockRejectedValueOnce(new Error('redis fora do ar (simulado)'))
+    await expect(processRawWebhook(raw.id)).rejects.toThrow('redis fora do ar (simulado)')
+    addSpy.mockRestore()
+
+    const afterFailure = await prismaUnsafe.rawWebhookEvent.findUnique({ where: { id: raw.id } })
+    // NÃO marcado como processado: o job precisa falhar de verdade para o BullMQ re-tentar
+    // (attempts: 3, ver queue/queues.ts) — achado CRÍTICO da revisão T10.
+    expect(afterFailure?.processed).toBe(false)
+
+    // Message/customerEvent já commitados antes do publish falhar (sem transação cobrindo
+    // os 3 passos) — isso é esperado; o que importa é que o RETRY seguinte reconhece o que
+    // já foi feito (dedupe por P2002 + timeline condicional) e completa sem duplicar nem
+    // perder o evento de domínio.
+    await processRawWebhook(raw.id)
+    const afterRetry = await prismaUnsafe.rawWebhookEvent.findUnique({ where: { id: raw.id } })
+    expect(afterRetry?.processed).toBe(true)
+    expect(afterRetry?.error).toBeNull()
+
+    const messages = await prismaUnsafe.message.count({
+      where: { companyId, provider: 'evolution', providerMessageId: '3A245B67166D7896E259' },
+    })
+    expect(messages).toBe(1) // sem duplicar apesar do crash no meio do caminho
   })
 })

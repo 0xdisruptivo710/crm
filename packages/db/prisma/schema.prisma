@@ -174,5 +174,9 @@ model RawWebhookEvent {
   receivedAt DateTime @default(now()) @map("received_at")
 
   @@index([provider, processed])
+  // Suporta a query de reconciliação (apps/api/src/queue/webhook-worker.ts): raws não
+  // processados mais velhos que a janela mínima — sem este índice, vira full scan à
+  // medida que a tabela cresce (achado da revisão T10).
+  @@index([processed, receivedAt])
   @@map("raw_webhook_events")
 }

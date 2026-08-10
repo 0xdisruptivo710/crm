@@ -83,6 +83,18 @@ function isGroupJid(jid: string): boolean {
   return jid.endsWith('@g.us')
 }
 
+// Endereçamento "LID" (linked ID) do WhatsApp no TOPO do key.remoteJid: não é um número
+// de telefone real, é um identificador interno — canonicalizePhone (Task 3) até aceitaria
+// os dígitos, mas o "telefone" resultante seria fantasma (não dá para resolver Customer
+// nem responder de volta a partir dele). Nenhuma fixture real tem key.remoteJid @lid no
+// topo hoje (o @lid observado nas fixtures aparece em campos aninhados, ex.:
+// contextInfo.participant) — comportamento defensivo antecipado (achado da revisão T10).
+// Carry-over consciente para Plano C/D: suporte a LID de verdade exige outro fluxo de
+// resolução de identidade, não um patch aqui.
+function isLidJid(jid: string): boolean {
+  return jid.endsWith('@lid')
+}
+
 // Timestamp da Evolution vem em segundos unix (messageTimestamp); date_time do envelope
 // é ISO 8601. Ambos convertidos para Date; nunca deixamos `undefined` virar `new Date(undefined)`
 // (que resultaria em "Invalid Date" silencioso).
@@ -99,6 +111,7 @@ function parseMessagesUpsert(data: EvolutionUpsertData, dateTime: unknown): Inco
   const providerMessageId = isRecord(key) ? asString(key.id) : null
   if (!remoteJid || !providerMessageId) return null
   if (isGroupJid(remoteJid)) return null
+  if (isLidJid(remoteJid)) return null
 
   const message = data.message
   if (!isRecord(message)) return null
@@ -172,13 +185,19 @@ function parseMessagesUpsert(data: EvolutionUpsertData, dateTime: unknown): Inco
 // Status/ack da Evolution (Baileys por baixo) não mapeiam 1:1 para a máquina de
 // estados do ADR-0006. PENDING e SERVER_ACK (mensagem aceita/entregue ao servidor do
 // WhatsApp, ainda não no aparelho do destinatário) colapsam em "sent" — o contrato só
-// tem sent/delivered/read/failed, sem um estado intermediário para elas. Valor
-// desconhecido é ignorado (null) em vez de arriscar um mapeamento errado.
-const STATUS_MAP: Record<string, MessageStatusUpdate['status']> = {
+// tem sent/delivered/read/failed, sem um estado intermediário para elas. ERROR (falha
+// genuína de envio) mapeia para "failed" — faltava na v1 (achado da revisão T10: sem
+// isso, uma falha de envio de verdade virava null e desaparecia silenciosamente em vez
+// de acionar a máquina de estados). Valor desconhecido continua ignorado (null) em vez
+// de arriscar um mapeamento errado. Exportado para teste direto e puro da tabela
+// (packages/providers/test/evolution-parse-edge-cases.test.ts) — sem fixture real para
+// ERROR ainda, então o teste cobre a tabela, não um payload capturado.
+export const STATUS_MAP: Record<string, MessageStatusUpdate['status']> = {
   PENDING: 'sent',
   SERVER_ACK: 'sent',
   DELIVERY_ACK: 'delivered',
   READ: 'read',
+  ERROR: 'failed',
 }
 
 function parseMessagesUpdate(data: EvolutionUpdateData, dateTime: unknown): MessageStatusUpdate | null {
