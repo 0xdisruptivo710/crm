@@ -4,7 +4,10 @@ name: Deploy API image
 # nunca builda, só puxa a imagem pronta.
 on:
   push:
-    branches: [master]
+    # TEMP: plano-b-pipeline-evolution adicionada só para provar o build antes do merge
+    # (workflow_dispatch exige que o arquivo já exista na branch default — GitHub 404
+    # "workflow not found on the default branch" — remover esta linha após a 1a run verde).
+    branches: [master, plano-b-pipeline-evolution]
     paths:
       - "apps/**"
       - "packages/**"
