@@ -1,6 +1,7 @@
 import type { NormalizedWebhookEvent } from '@aios-pocket/contracts'
 import type { EvolutionConfig, MessagingProvider, OutboundMedia, SendResult } from '../types.js'
 import { evolutionRequest } from './http.js'
+import { parseEvolutionWebhook } from './parse.js'
 
 interface EvolutionSendResponse {
   key?: { id?: string }
@@ -43,12 +44,7 @@ export function createEvolutionProvider(config: EvolutionConfig): MessagingProvi
     },
 
     parseWebhook(raw: unknown): NormalizedWebhookEvent | null {
-      // Implementado na Task 9, com TDD sobre fixtures REAIS capturadas nas Tasks 7-8.
-      // Fixture inventada é proibida (Conventions.md) — por isso o stub lança.
-      // `raw` fica sem uso até lá; referenciá-lo evita o erro de no-unused-vars
-      // (aqui é o último parâmetro, então o "^_" de outros stubs no repo não ajuda).
-      void raw
-      throw new Error('parseWebhook: implementado na Task 9 sobre fixtures reais')
+      return parseEvolutionWebhook(raw)
     },
 
     async getConnectionStatus(): Promise<'connected' | 'disconnected' | 'connecting'> {
