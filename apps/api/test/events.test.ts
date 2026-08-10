@@ -7,10 +7,14 @@ import { onDomainEvent, publishDomainEvent } from '../src/queue/events.js'
 import { startDomainEventsWorker } from '../src/queue/workers.js'
 import { domainEventsQueue, webhookProcessingQueue, messageSendQueue } from '../src/queue/queues.js'
 import { redisWorkerConnection, redisQueueConnection } from '../src/queue/connection.js'
+import { assertTestRedis } from './redis-guard.js'
 
 let worker: Worker | undefined
 
 beforeAll(async () => {
+  // Antes de QUALQUER obliterate: recusa rodar contra o Redis vivo do piloto (mesmo env
+  // que as filas de produção consomem — config.REDIS_URL).
+  assertTestRedis(process.env.REDIS_URL ?? 'redis://localhost:6379')
   // Redis é remoto e compartilhado entre execuções: limpa a fila ANTES de rodar, para
   // não reprocessar (nem competir com) backlog de execuções anteriores. obliterate
   // (force: true) em vez do antigo drain(): outros arquivos deste pacote (ex.:

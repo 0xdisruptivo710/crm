@@ -10,6 +10,7 @@ import { domainEventsQueue, messageSendQueue } from '../src/queue/queues.js'
 import { processRawWebhook } from '../src/pipeline/process-webhook.js'
 import { markSendFailed, sendQueuedMessage } from '../src/pipeline/send-message.js'
 import { handleSendFailed, reconcileStuckMessages, startSendWorker } from '../src/queue/send-worker.js'
+import { assertTestRedis } from './redis-guard.js'
 
 // Mock do módulo de verificação JWT (padrão de auth-me-happy-path.test.ts): simula um JWT
 // válido cujo `sub` é o authUserId da fixture criada abaixo.
@@ -83,6 +84,10 @@ let companyBId: string
 let conversationBId: string
 
 beforeAll(async () => {
+  // Antes de qualquer uso da fila real (startSendWorker, messageSendQueue.add): recusa
+  // rodar contra o Redis vivo do piloto (mesmo env que as filas de produção consomem).
+  assertTestRedis(process.env.REDIS_URL ?? 'redis://localhost:6379')
+
   const company = await prismaUnsafe.company.create({
     data: { name: `Envio Teste ${randomUUID().slice(0, 8)}`, activeProvider: 'evolution', providerCredentials: 'cifrado-fake' },
   })

@@ -18,7 +18,10 @@ function assertSafeToWipe(databaseUrl: string | undefined): void {
   }
   const url = new URL(databaseUrl)
   const dbName = url.pathname.replace(/^\//, '')
-  const allowedDbNames = new Set(['aios-pocket', 'aios_pocket'])
+  // 'aios-pocket' é o banco VIVO do piloto desde o deploy do Plano B — proibido.
+  // Só os bancos de teste dedicados entram na lista: 'aios-pocket-test' (dev remoto) e
+  // 'aios_pocket' (nome usado em ambientes locais/CI, ver .env.example).
+  const allowedDbNames = new Set(['aios-pocket-test', 'aios_pocket'])
   if (url.hostname.endsWith('.supabase.co') || !allowedDbNames.has(dbName)) {
     throw new Error(
       `Recusando apagar dados: DATABASE_URL aponta para host="${url.hostname}" db="${dbName}", ` +

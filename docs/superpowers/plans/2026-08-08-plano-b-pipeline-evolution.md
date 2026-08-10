@@ -9,9 +9,10 @@
 **Tech Stack:** o mesmo do Plano A + undici/fetch nativo (chamadas Evolution), cloudflared (túnel de captura), Docker + GHCR (deploy).
 
 **Fatos de ambiente (sondados ao vivo, 2026-08-08):**
+> Credenciais que apareceram em versões deste documento foram ROTACIONADAS em 2026-08-10 — valores históricos são inválidos.
 - Evolution da produção: `https://aios-evolution.yspmhc.easypanel.host`, v2, instância `murilo` conectada — **webhook dela alimenta o n8n da operação: INTOCÁVEL**.
 - Decisão do usuário: **Evolution dev dedicada** como serviço novo no projeto `aios-pocket` do EasyPanel (droplet 143.198.98.6), usando o `postgres-dev` (database separado `evolution`) e o `redis-dev` (DB index 3) já existentes.
-- API key da Evolution dev (gerada; vai para o .env na Task 4): `2CF7F0D486A4A1328650DCA4588C1B86`.
+- API key da Evolution dev (gerada; vai para o .env na Task 4): `<EVOLUTION_API_KEY>`.
 - Domínio previsto da Evolution dev: `aios-pocket-evolution-dev.yspmhc.easypanel.host` (porta interna 8080).
 
 ## Global Constraints
@@ -243,13 +244,13 @@ export { canonicalizePhone, phoneMatchCandidates, type CanonicalPhone } from './
 - Nenhum código de produto — infra + coordenação.
 
 **Interfaces:**
-- Produces: Evolution API dev no ar em `https://aios-pocket-evolution-dev.yspmhc.easypanel.host` com API key `2CF7F0D486A4A1328650DCA4588C1B86`; instância `aios-pocket` criada e CONECTADA (QR escaneado pelo usuário); vars `EVOLUTION_DEV_BASE_URL`, `EVOLUTION_DEV_API_KEY`, `EVOLUTION_DEV_INSTANCE` no `.env`. As tasks 5+ usam SEMPRE a instância dev — as vars `EVOLUTION_*` antigas (produção `murilo`) ficam no `.env` mas NÃO são usadas por código.
+- Produces: Evolution API dev no ar em `https://aios-pocket-evolution-dev.yspmhc.easypanel.host` com API key `<EVOLUTION_API_KEY>`; instância `aios-pocket` criada e CONECTADA (QR escaneado pelo usuário); vars `EVOLUTION_DEV_BASE_URL`, `EVOLUTION_DEV_API_KEY`, `EVOLUTION_DEV_INSTANCE` no `.env`. As tasks 5+ usam SEMPRE a instância dev — as vars `EVOLUTION_*` antigas (produção `murilo`) ficam no `.env` mas NÃO são usadas por código.
 
 - [ ] **Step 1: Criar o database `evolution` no postgres-dev**
 
 Run (da raiz):
 ```bash
-echo 'CREATE DATABASE evolution;' | pnpm --filter @aios-pocket/db exec prisma db execute --stdin --url "postgresql://postgres:UaVTfUSkYLfQkbyN6nAmKHhY@143.198.98.6:5433/postgres"
+echo 'CREATE DATABASE evolution;' | pnpm --filter @aios-pocket/db exec prisma db execute --stdin --url "postgresql://postgres:<SENHA_PG_ROTACIONADA>@143.198.98.6:5433/postgres"
 ```
 Expected: sucesso silencioso. (Se já existir, erro "already exists" é aceitável — seguir.)
 
@@ -266,7 +267,7 @@ Apresentar ao usuário (checkpoint — aguardar ele confirmar a criação):
         "projectName": "aios-pocket",
         "serviceName": "evolution-dev",
         "source": { "type": "image", "image": "evoapicloud/evolution-api:latest" },
-        "env": "SERVER_URL=https://aios-pocket-evolution-dev.yspmhc.easypanel.host\r\nAUTHENTICATION_API_KEY=2CF7F0D486A4A1328650DCA4588C1B86\r\nAUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true\r\nDATABASE_ENABLED=true\r\nDATABASE_PROVIDER=postgresql\r\nDATABASE_CONNECTION_URI=postgres://postgres:UaVTfUSkYLfQkbyN6nAmKHhY@aios-pocket_postgres-dev:5432/evolution\r\nDATABASE_CONNECTION_CLIENT_NAME=aios-pocket-dev\r\nCACHE_REDIS_ENABLED=true\r\nCACHE_REDIS_URI=redis://default:KyE3ZPzyXp9rCiMug5ToTXVE@aios-pocket_redis-dev:6379/3\r\nCACHE_REDIS_PREFIX_KEY=evolution-dev\r\nCACHE_REDIS_SAVE_INSTANCES=false\r\nCACHE_LOCAL_ENABLED=false\r\nCONFIG_SESSION_PHONE_CLIENT=chrome\r\nCONFIG_SESSION_PHONE_NAME=Chrome\r\nQRCODE_LIMIT=5\r\nDEL_INSTANCE=false\r\nLANGUAGE=pt-BR",
+        "env": "SERVER_URL=https://aios-pocket-evolution-dev.yspmhc.easypanel.host\r\nAUTHENTICATION_API_KEY=<EVOLUTION_API_KEY>\r\nAUTHENTICATION_EXPOSE_IN_FETCH_INSTANCES=true\r\nDATABASE_ENABLED=true\r\nDATABASE_PROVIDER=postgresql\r\nDATABASE_CONNECTION_URI=postgres://postgres:<SENHA_PG_ROTACIONADA>@aios-pocket_postgres-dev:5432/evolution\r\nDATABASE_CONNECTION_CLIENT_NAME=aios-pocket-dev\r\nCACHE_REDIS_ENABLED=true\r\nCACHE_REDIS_URI=redis://default:<SENHA_REDIS_ROTACIONADA>@aios-pocket_redis-dev:6379/3\r\nCACHE_REDIS_PREFIX_KEY=evolution-dev\r\nCACHE_REDIS_SAVE_INSTANCES=false\r\nCACHE_LOCAL_ENABLED=false\r\nCONFIG_SESSION_PHONE_CLIENT=chrome\r\nCONFIG_SESSION_PHONE_NAME=Chrome\r\nQRCODE_LIMIT=5\r\nDEL_INSTANCE=false\r\nLANGUAGE=pt-BR",
         "deploy": { "replicas": 1, "command": null, "zeroDowntime": true },
         "domains": [
           {
@@ -287,21 +288,21 @@ Instruir também: aba **Recursos** do `evolution-dev` → limite de memória **1
 
 - [ ] **Step 3: Verificar a Evolution dev no ar**
 
-Run: `curl -s https://aios-pocket-evolution-dev.yspmhc.easypanel.host/ -H 'apikey: 2CF7F0D486A4A1328650DCA4588C1B86'`
+Run: `curl -s https://aios-pocket-evolution-dev.yspmhc.easypanel.host/ -H 'apikey: <EVOLUTION_API_KEY>'`
 Expected: JSON de boas-vindas com a versão. (Domínio pode variar se o EasyPanel sugerir outro — usar o real e registrar.)
 
 - [ ] **Step 4: Criar a instância do piloto e obter o QR**
 
 ```bash
 curl -s -X POST 'https://aios-pocket-evolution-dev.yspmhc.easypanel.host/instance/create' \
-  -H 'apikey: 2CF7F0D486A4A1328650DCA4588C1B86' -H 'Content-Type: application/json' \
+  -H 'apikey: <EVOLUTION_API_KEY>' -H 'Content-Type: application/json' \
   -d '{"instanceName":"aios-pocket","integration":"WHATSAPP-BAILEYS","qrcode":true}'
 ```
 A resposta traz `qrcode.base64` (data URI PNG). Salvar como imagem (`[Convert]::FromBase64String` no PowerShell, tirando o prefixo `data:image/png;base64,`) em `C:\Users\Usuario\Desktop\CRM\qr-aios-pocket.png` e AVISAR o usuário para escanear (WhatsApp → Aparelhos conectados). ATENÇÃO ao instruir o usuário: escanear preferencialmente com um número que NÃO seja o do `murilo` — o mesmo número em duas instâncias Baileys pode gerar conflito de dispositivo (`device_removed`, já aconteceu nesse servidor). Se o QR expirar, `GET /instance/connect/aios-pocket` gera outro.
 
 - [ ] **Step 5: Confirmar conexão (aguardar o scan do usuário)**
 
-Run: `curl -s 'https://aios-pocket-evolution-dev.yspmhc.easypanel.host/instance/connectionState/aios-pocket' -H 'apikey: 2CF7F0D486A4A1328650DCA4588C1B86'`
+Run: `curl -s 'https://aios-pocket-evolution-dev.yspmhc.easypanel.host/instance/connectionState/aios-pocket' -H 'apikey: <EVOLUTION_API_KEY>'`
 Expected: `{"instance":{"instanceName":"aios-pocket","state":"open"}}`.
 
 - [ ] **Step 6: Registrar env e commitar o .env.example**
@@ -310,7 +311,7 @@ Acrescentar ao `.env` (real) e ao `.env.example` (sem valores):
 ```
 # Evolution DEDICADA de dev (projeto aios-pocket no EasyPanel) — a de produção (murilo) é INTOCÁVEL
 EVOLUTION_DEV_BASE_URL=https://aios-pocket-evolution-dev.yspmhc.easypanel.host
-EVOLUTION_DEV_API_KEY=2CF7F0D486A4A1328650DCA4588C1B86
+EVOLUTION_DEV_API_KEY=<EVOLUTION_API_KEY>
 EVOLUTION_DEV_INSTANCE=aios-pocket
 ```
 Atualizar também as credenciais cifradas do seed: em `packages/db/prisma/seed.ts`, o bloco `evolution` passa a ler `EVOLUTION_DEV_*` (baseUrl, apiKey, instanceId=EVOLUTION_DEV_INSTANCE). Rodar `pnpm --filter @aios-pocket/db run db:seed` para recifrar.
@@ -733,7 +734,7 @@ Run em background: `pnpm --filter @aios-pocket/api dev` e `cloudflared tunnel --
 Obter o `webhookToken` da company piloto (`Aios Pocket`) via query. Depois:
 ```bash
 curl -s -X POST 'https://aios-pocket-evolution-dev.yspmhc.easypanel.host/webhook/set/aios-pocket' \
-  -H 'apikey: 2CF7F0D486A4A1328650DCA4588C1B86' -H 'Content-Type: application/json' \
+  -H 'apikey: <EVOLUTION_API_KEY>' -H 'Content-Type: application/json' \
   -d '{"webhook":{"enabled":true,"url":"https://<tunel>.trycloudflare.com/webhooks/evolution/<webhookToken>","webhookByEvents":false,"events":["MESSAGES_UPSERT","MESSAGES_UPDATE","SEND_MESSAGE","CONNECTION_UPDATE"]}}'
 ```
 (SÓ a instância dev `aios-pocket` — JAMAIS a `murilo`.) Se o shape `{"webhook":{...}}` falhar na versão instalada, tentar o shape plano `{"enabled":...}` e registrar.

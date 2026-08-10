@@ -115,9 +115,15 @@ function schedulePeriodicSweep(worker: Worker): void {
 // T11 round 2) — o efeito é o mesmo: terminal já, `isFailed()` verdadeiro na hora.
 export async function handleSendFailed(job: Job | undefined, err: Error): Promise<void> {
   if (!job) return
-  const terminal = await job.isFailed()
-  if (!terminal) return // BullMQ ainda vai reagendar esta tentativa — nada a fazer aqui
   const { messageId, companyId } = job.data as SendJobData
+  const terminal = await job.isFailed()
+  if (!terminal) {
+    // Ainda não é terminal — BullMQ vai reagendar. Loga mesmo assim: sem isso, uma
+    // instabilidade real do provider (ex.: Evolution fora do ar por alguns minutos) fica
+    // invisível até a tentativa final, dificultando o diagnóstico de outages em produção.
+    console.error('[send] tentativa falhou (retry a caminho)', { messageId, err: err?.message })
+    return
+  }
   await markSendFailed(messageId, companyId, err.message)
 }
 

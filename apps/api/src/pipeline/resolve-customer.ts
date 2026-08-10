@@ -1,8 +1,5 @@
 import { customersRepo, phoneMatchCandidates, type CanonicalPhone } from '@aios-pocket/db'
-
-function isUniqueConstraintError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002'
-}
+import { isUniqueConstraintError } from './prisma-errors.js'
 
 // Resolve o Customer dono do telefone JÁ CANONICALIZADO de uma IncomingMessage; cria se
 // nenhuma candidata bater (Domain.md: "Customer é resolvido/criado na chegada de qualquer

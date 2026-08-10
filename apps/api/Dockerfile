@@ -16,6 +16,9 @@ RUN pnpm --filter @aios-pocket/db run db:generate
 
 FROM node:22-slim
 RUN corepack enable
+# openssl é exigido pela engine query do Prisma em runtime — sem ele o client emite o
+# warning "Unable to require libssl" e, em algumas distros, falha ao conectar.
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY --from=build /repo /repo
 ENV NODE_ENV=production
