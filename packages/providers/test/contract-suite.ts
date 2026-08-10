@@ -1,6 +1,7 @@
 import { readFileSync, readdirSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
+import { normalizedWebhookEventSchema } from '@aios-pocket/contracts'
 import type { MessagingProvider } from '../src/index.js'
 
 interface ManifestEntry {
@@ -24,6 +25,16 @@ interface ManifestEntry {
 // parser não decodifica em detalhe (secretEncryptedMessage/templateMessage) e o eco do
 // próprio envio feito pela API (send.message, correlacionável só por key.id — sem valor
 // para o pipeline, que já sabe o que enviou). Nenhum desses vira IncomingMessage no v1.
+//
+// NOTA sobre incoming_reaction-1.json (fix round 1, review do controller): essa fixture
+// é de GRUPO (remoteJid terminado em @g.us) — o retorno null que ela exercita é o
+// early-return de JID de grupo em parseMessagesUpsert, não o branch genérico de "tipo
+// de mensagem não decodificado" que cobre reactionMessage/secretEncryptedMessage/
+// templateMessage. Checado ao vivo no banco de dev em 2026-08-10: só existem 2 eventos
+// reactionMessage capturados até agora, ambos de grupo — não há candidato 1:1 para
+// virar fixture ainda. Cobertura da reação está limitada ao caso de grupo
+// (early-return); reação 1:1 pendente de captura — o branch genérico (mesmo código que
+// trataria uma reação 1:1) já é exercitado por incoming_special-1/2.json.
 const IGNORED_KINDS = new Set<ManifestEntry['kind']>(['incoming_reaction', 'incoming_special', 'send_message_echo'])
 
 // Suíte de contrato provider-agnóstica (ADR-0002): a MESMA bateria roda para
@@ -67,6 +78,13 @@ export function runProviderContractSuite(provider: MessagingProvider, fixturesDi
 
         expect(parsed, 'payload real não pode virar null nas categorias mapeadas').not.toBeNull()
         if (!parsed) return
+
+        // Proteção contra schema-drift (fix round 1): todo resultado não-nulo, de
+        // QUALQUER provider, precisa satisfazer o contrato normalizado — pega tanto
+        // um campo esquecido quanto um enum inválido que os `expect` pontuais abaixo
+        // não cobrem individualmente.
+        expect(() => normalizedWebhookEventSchema.parse(parsed)).not.toThrow()
+
         if (entry.kind.startsWith('incoming')) {
           expect(parsed.kind).toBe('incoming_message')
           if (parsed.kind !== 'incoming_message') return
@@ -79,8 +97,17 @@ export function runProviderContractSuite(provider: MessagingProvider, fixturesDi
           }
           if (entry.kind === 'incoming_reply') expect(parsed.replyToProviderMessageId).not.toBeNull()
         }
-        if (entry.kind === 'status_update') expect(parsed.kind).toBe('message_status_update')
-        if (entry.kind === 'connection_update') expect(parsed.kind).toBe('connection_status_change')
+        if (entry.kind === 'status_update') {
+          expect(parsed.kind).toBe('message_status_update')
+          if (parsed.kind !== 'message_status_update') return
+          expect(parsed.providerMessageId.length).toBeGreaterThan(3)
+          expect(['sent', 'delivered', 'read', 'failed']).toContain(parsed.status)
+        }
+        if (entry.kind === 'connection_update') {
+          expect(parsed.kind).toBe('connection_status_change')
+          if (parsed.kind !== 'connection_status_change') return
+          expect(['connected', 'disconnected', 'connecting']).toContain(parsed.status)
+        }
       })
     }
 
