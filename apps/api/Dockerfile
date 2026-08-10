@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1
-# Contexto de build = raiz do monorepo (necessário para pnpm workspaces). Task 12.
+# Contexto de build = raiz do monorepo (necessário para pnpm workspaces).
 # Buildado exclusivamente no GitHub Actions -> GHCR; NUNCA no droplet (EasyPanel só puxa a imagem).
 
 FROM node:22-slim AS build
