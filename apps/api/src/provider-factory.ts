@@ -30,7 +30,16 @@ export interface CompanyForProvider {
 // provider ativo do tenant. Nenhum outro módulo de negócio deve saber decifrar
 // credenciais ou instanciar um provider diretamente.
 export function providerForCompany(company: CompanyForProvider): MessagingProvider {
-  const credentials = decryptJson<DecryptedCredentials>(company.providerCredentials, config.APP_ENCRYPTION_KEY)
+  let credentials: DecryptedCredentials
+  try {
+    credentials = decryptJson<DecryptedCredentials>(company.providerCredentials, config.APP_ENCRYPTION_KEY)
+  } catch (err) {
+    // decryptJson lança erros opacos (chave errada, payload corrompido, JSON inválido —
+    // vêm direto do módulo crypto nativo ou de JSON.parse). Encapsula numa mensagem legível
+    // para quem opera (achado IMPORTANT da re-review T11) — mantém a causa original via
+    // `cause` para não perder o diagnóstico.
+    throw new Error('credenciais da company não puderam ser decifradas', { cause: err })
+  }
 
   if (company.activeProvider === 'evolution') {
     return createEvolutionProvider(credentials.evolution)

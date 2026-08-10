@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
+import type { Job } from 'bullmq'
 import { describe, expect, it, vi, beforeAll, afterAll } from 'vitest'
 import { prismaUnsafe } from '@aios-pocket/db/testing'
 import type { MessagingProvider } from '@aios-pocket/providers'
@@ -8,6 +9,7 @@ import { buildApp } from '../src/app.js'
 import { domainEventsQueue, messageSendQueue } from '../src/queue/queues.js'
 import { processRawWebhook } from '../src/pipeline/process-webhook.js'
 import { markSendFailed, sendQueuedMessage } from '../src/pipeline/send-message.js'
+import { handleSendFailed, reconcileStuckMessages, startSendWorker } from '../src/queue/send-worker.js'
 
 // Mock do módulo de verificação JWT (padrão de auth-me-happy-path.test.ts): simula um JWT
 // válido cujo `sub` é o authUserId da fixture criada abaixo.
@@ -36,6 +38,38 @@ function fakeProvider(): MessagingProvider {
     parseWebhook: () => null,
     getConnectionStatus: async () => 'connected',
   }
+}
+
+// Poll robusto contra a latência variável do Postgres remoto de dev (achado da re-review
+// T11 round 2: um sleep fixo se mostrou frágil esperando o handler `failed`, fire-and-
+// forget, terminar sua cadeia de escritas NÃO transacional — updateMany de estado, depois
+// findFirst/findFirst/create da timeline, cada um um round-trip separado). Usado só no
+// teste de integração real Queue+Worker, onde não há como `await` diretamente o handler
+// interno do worker. Genérico: espera qualquer condição, não só o estado da Message —
+// usado tanto para o estado quanto (separadamente, depois) para a timeline, porque as
+// duas escritas não são atômicas entre si.
+async function waitFor<T>(fn: () => Promise<T | null>, timeoutMs = 8000): Promise<T | null> {
+  const deadline = Date.now() + timeoutMs
+  for (;;) {
+    const result = await fn()
+    if (result !== null || Date.now() > deadline) return result
+    await new Promise((resolve) => setTimeout(resolve, 200))
+  }
+}
+
+function createMessage(overrides: { state?: 'queued' | 'sending'; text?: string } = {}) {
+  return prismaUnsafe.message.create({
+    data: {
+      companyId,
+      conversationId,
+      direction: 'outbound',
+      state: overrides.state ?? 'queued',
+      provider: 'evolution',
+      type: 'text',
+      text: overrides.text ?? 'mensagem de teste',
+      correlationId: randomUUID(),
+    },
+  })
 }
 
 const app = buildApp()
@@ -164,6 +198,46 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
     expect(sendTextCalls).toHaveLength(0)
 
     addSpy.mockRestore()
+    // Não deixa a linha 'queued' para trás no banco compartilhado (nunca processada por
+    // um worker de verdade neste teste) — ela poderia ser capturada pela varredura de
+    // reconciliação de outro teste deste arquivo.
+    await prismaUnsafe.message.deleteMany({ where: { id: body.messageId } })
+  })
+
+  it('falha ao enfileirar: responde 500 (usuário precisa saber, diferente do webhook) — Message fica queued para a varredura de reconciliação cobrir (achado IMPORTANT da re-review T11, item 5)', async () => {
+    const addSpy = vi.spyOn(messageSendQueue, 'add').mockRejectedValueOnce(new Error('redis fora do ar (simulado)'))
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/messages',
+      headers: { authorization: 'Bearer qualquer-token' },
+      payload: { conversationId, text: 'vai falhar ao enfileirar' },
+    })
+    expect(res.statusCode).toBe(500)
+    addSpy.mockRestore()
+
+    const message = await prismaUnsafe.message.findFirst({
+      where: { companyId, text: 'vai falhar ao enfileirar' },
+      orderBy: { createdAt: 'desc' },
+    })
+    expect(message?.state).toBe('queued') // criada mesmo com o enqueue tendo falhado
+
+    // Simula a janela de 5min já passada (mesmo padrão de RECONCILE_MIN_AGE_MS em
+    // pipeline-inbound.test.ts) e roda a varredura diretamente.
+    await prismaUnsafe.message.update({
+      where: { id: message!.id },
+      data: { createdAt: new Date(Date.now() - 6 * 60 * 1000) },
+    })
+
+    const reenqueueSpy = vi.spyOn(messageSendQueue, 'add')
+    await reconcileStuckMessages()
+    const reenqueued = reenqueueSpy.mock.calls.some(
+      (call) => (call[1] as { messageId?: string } | undefined)?.messageId === message!.id,
+    )
+    expect(reenqueued).toBe(true)
+    reenqueueSpy.mockRestore()
+
+    await prismaUnsafe.message.deleteMany({ where: { id: message!.id } })
   })
 })
 
@@ -171,18 +245,7 @@ describe('sendQueuedMessage (worker `message-send` — máquina de estados, ADR-
   let sentMessageId: string
 
   beforeAll(async () => {
-    const message = await prismaUnsafe.message.create({
-      data: {
-        companyId,
-        conversationId,
-        direction: 'outbound',
-        state: 'queued',
-        provider: 'evolution',
-        type: 'text',
-        text: 'resposta de teste do Aios Pocket',
-        correlationId: randomUUID(),
-      },
-    })
+    const message = await createMessage({ text: 'resposta de teste do Aios Pocket' })
     sentMessageId = message.id
   })
 
@@ -194,7 +257,7 @@ describe('sendQueuedMessage (worker `message-send` — máquina de estados, ADR-
     const callsBefore = sendTextCalls.length
     const addSpy = vi.spyOn(domainEventsQueue, 'add')
 
-    await sendQueuedMessage(sentMessageId, companyId, 0)
+    await sendQueuedMessage(sentMessageId, companyId)
 
     const message = await prismaUnsafe.message.findFirst({ where: { id: sentMessageId } })
     expect(message?.state).toBe('sent')
@@ -223,7 +286,7 @@ describe('sendQueuedMessage (worker `message-send` — máquina de estados, ADR-
     })
     const addSpy = vi.spyOn(domainEventsQueue, 'add')
 
-    await sendQueuedMessage(sentMessageId, companyId, 0) // attemptsMade=0 simula reexecução do MESMO job
+    await sendQueuedMessage(sentMessageId, companyId) // reexecução do MESMO job (já sent)
 
     expect(sendTextCalls.length).toBe(callsBefore)
     const timelineCountAfter = await prismaUnsafe.customerEvent.count({
@@ -234,37 +297,72 @@ describe('sendQueuedMessage (worker `message-send` — máquina de estados, ADR-
 
     addSpy.mockRestore()
   })
+
+  it('reentrada com state ainda `sending` (simula recuperação de job "stalled" do BullMQ, que NÃO incrementa attemptsMade): nunca reenvia — fica presa até a varredura decidir (achado CRÍTICO da re-review T11)', async () => {
+    const message = await createMessage({ state: 'sending', text: 'travada em sending' })
+    const callsBefore = sendTextCalls.length
+
+    await sendQueuedMessage(message.id, companyId)
+
+    expect(sendTextCalls.length).toBe(callsBefore) // NUNCA chama o provider de novo
+    const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+    expect(after?.state).toBe('sending') // continua presa — resolvida só pela varredura de 10min
+  })
+
+  it('corrida do eco no CAS final: eco processado ANTES da atualização sending→sent (mesmo providerMessageId) não lança — a linha do eco vence, a linha original órfã é removida (achado IMPORTANT da re-review T11)', async () => {
+    const message = await createMessage({ text: 'vai colidir com o eco' })
+
+    sendTextImpl = async (to, text) => {
+      sendTextCalls.push({ to, text })
+      // Simula o webhook de eco tendo sido processado ENQUANTO o sendText estava em voo:
+      // cria a linha "canônica" que o pipeline inbound criaria (a guarda fromMe de
+      // process-webhook.ts não a reconhece como eco porque, neste instante, a NOSSA
+      // linha ainda tem providerMessageId nulo).
+      await prismaUnsafe.message.create({
+        data: {
+          companyId,
+          conversationId,
+          direction: 'outbound',
+          state: 'sent',
+          provider: 'evolution',
+          providerMessageId: 'FAKE-RACE-1',
+          fromMe: true,
+          type: 'text',
+          text,
+          correlationId: randomUUID(),
+        },
+      })
+      return { providerMessageId: 'FAKE-RACE-1' }
+    }
+
+    await expect(sendQueuedMessage(message.id, companyId)).resolves.toBeUndefined() // nunca lança
+
+    const original = await prismaUnsafe.message.findUnique({ where: { id: message.id } })
+    expect(original).toBeNull() // linha original órfã (sending, sem providerMessageId) removida
+
+    const outboundRows = await prismaUnsafe.message.findMany({
+      where: { companyId, provider: 'evolution', providerMessageId: 'FAKE-RACE-1', direction: 'outbound' },
+    })
+    expect(outboundRows).toHaveLength(1) // exatamente uma linha sobrevive: a do eco
+  })
 })
 
 describe('falha do provider — nunca silenciosa (carry-over T7 / DLQ do send)', () => {
-  it('provider lança em todas as tentativas: sendQueuedMessage propaga (BullMQ re-tentaria); após esgotamento, markSendFailed grava failed + failReason + timeline', async () => {
+  it('provider lança: sendQueuedMessage propaga (BullMQ decide retry); markSendFailed grava failed + failReason + timeline quando chamado', async () => {
     sendTextImpl = async () => {
       throw new Error('evolution indisponível (simulado)')
     }
 
-    const message = await prismaUnsafe.message.create({
-      data: {
-        companyId,
-        conversationId,
-        direction: 'outbound',
-        state: 'queued',
-        provider: 'evolution',
-        type: 'text',
-        text: 'vai falhar',
-        correlationId: randomUUID(),
-      },
-    })
+    const message = await createMessage({ text: 'vai falhar' })
 
-    // 1ª tentativa: propaga o erro do provider — nunca falha silenciosa, o BullMQ real
-    // tentaria de novo (attempts: 3, ver queue/queues.ts do enqueue na rota).
-    await expect(sendQueuedMessage(message.id, companyId, 0)).rejects.toThrow('evolution indisponível (simulado)')
+    // 1ª tentativa: propaga o erro do provider — nunca falha silenciosa.
+    await expect(sendQueuedMessage(message.id, companyId)).rejects.toThrow('evolution indisponível (simulado)')
 
     const stillSending = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
     expect(stillSending?.state).toBe('sending') // em tentativa; não terminal por conta própria
 
-    // Simula o handler `worker.on('failed', ...)` (queue/send-worker.ts) depois de
-    // esgotadas as 3 tentativas — chamado diretamente (carry-over T7: "simular chamando o
-    // failed-handler diretamente OU worker real com attempts baixos").
+    // Simula o handler `worker.on('failed', ...)` já tendo confirmado o job como terminal
+    // (job.isFailed() === true) — chamado diretamente (carry-over T7).
     await markSendFailed(message.id, companyId, 'evolution indisponível (simulado)')
 
     const failed = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
@@ -273,6 +371,109 @@ describe('falha do provider — nunca silenciosa (carry-over T7 / DLQ do send)',
 
     const timeline = await prismaUnsafe.customerEvent.findFirst({
       where: { customerId, type: 'message_send_failed', correlationId: failed?.correlationId },
+    })
+    expect(timeline).not.toBeNull()
+  })
+})
+
+describe('DLQ do send: handler `failed` do worker — nunca silencioso, verificado contra job.isFailed() (achado CRÍTICO/IMPORTANT da re-review T11)', () => {
+  it('unit: job.isFailed()=true (terminal de verdade) → markSendFailed grava failed + failReason + timeline', async () => {
+    const message = await createMessage({ state: 'sending', text: 'preso em sending' })
+    const fakeJob = {
+      isFailed: vi.fn().mockResolvedValue(true),
+      data: { messageId: message.id, companyId },
+    }
+
+    await handleSendFailed(fakeJob as unknown as Job, new Error('esgotado (simulado)'))
+
+    const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+    expect(after?.state).toBe('failed')
+    expect(after?.failReason).toBe('esgotado (simulado)')
+
+    const timeline = await prismaUnsafe.customerEvent.findFirst({
+      where: { customerId, type: 'message_send_failed', correlationId: after?.correlationId },
+    })
+    expect(timeline).not.toBeNull()
+  })
+
+  it('unit: job.isFailed()=false (BullMQ ainda vai reagendar) → NÃO marca failed — silêncio correto aqui, o retry está a caminho', async () => {
+    const message = await createMessage({ state: 'sending', text: 'ainda vai tentar de novo' })
+    const fakeJob = {
+      isFailed: vi.fn().mockResolvedValue(false),
+      data: { messageId: message.id, companyId },
+    }
+
+    await handleSendFailed(fakeJob as unknown as Job, new Error('falha transitória (simulada)'))
+
+    const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+    expect(after?.state).toBe('sending') // não terminal — não mexe
+  })
+
+  it(
+    'integração real: Queue+Worker de verdade, attempts:1, provider lança → evento "failed" → Message failed + timeline',
+    async () => {
+      const message = await createMessage({ text: 'vai falhar de verdade' })
+      sendTextImpl = async () => {
+        throw new Error('provider indisponível (integração real)')
+      }
+
+      const worker = startSendWorker()
+      try {
+        const failedEvent = new Promise<void>((resolve, reject) => {
+          worker.on('failed', (job) => {
+            if (job?.data?.messageId === message.id) resolve()
+          })
+          worker.on('error', reject)
+        })
+
+        await messageSendQueue.add('send', { messageId: message.id, companyId }, { jobId: message.id, attempts: 1 })
+
+        await failedEvent
+        // O handler 'failed' interno roda fire-and-forget (handleSendFailed faz
+        // job.isFailed() + vários round-trips do Prisma contra o Postgres remoto de dev,
+        // NÃO transacionais entre si — dezenas a centenas de ms cada, como os outros
+        // testes deste arquivo já mostram). Um sleep fixo é frágil contra essa variância;
+        // poll até cada condição aparecer é o jeito robusto de esperar — estado e timeline
+        // são esperados SEPARADAMENTE porque são escritas distintas, não atômicas.
+        const after = await waitFor(async () => {
+          const m = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+          return m?.state === 'failed' ? m : null
+        })
+        expect(after?.state).toBe('failed')
+        expect(after?.failReason).toBe('provider indisponível (integração real)')
+
+        const timeline = await waitFor(() =>
+          prismaUnsafe.customerEvent.findFirst({
+            where: { customerId, type: 'message_send_failed', correlationId: after?.correlationId },
+          }),
+        )
+        expect(timeline).not.toBeNull()
+      } finally {
+        await worker.close()
+        const job = await messageSendQueue.getJob(message.id)
+        await job?.remove()
+      }
+    },
+    20000,
+  )
+})
+
+describe('varredura de reconciliação: Message presa em `sending` (achado CRÍTICO da re-review T11, item 1)', () => {
+  it('sending há mais de 10min é marcada failed com motivo fixo — cicatriz visível, nunca reenvio automático', async () => {
+    const message = await createMessage({ state: 'sending', text: 'presa de verdade há muito tempo' })
+    await prismaUnsafe.message.update({
+      where: { id: message.id },
+      data: { createdAt: new Date(Date.now() - 11 * 60 * 1000) },
+    })
+
+    await reconcileStuckMessages()
+
+    const after = await prismaUnsafe.message.findFirst({ where: { id: message.id } })
+    expect(after?.state).toBe('failed')
+    expect(after?.failReason).toBe('estado incerto (crash durante envio)')
+
+    const timeline = await prismaUnsafe.customerEvent.findFirst({
+      where: { customerId, type: 'message_send_failed', correlationId: after?.correlationId },
     })
     expect(timeline).not.toBeNull()
   })

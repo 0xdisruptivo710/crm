@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { sendMessageRequestSchema } from '@aios-pocket/contracts'
 import { getTenant, prisma } from '@aios-pocket/db'
-import { messageSendQueue } from '../queue/queues.js'
+import { MESSAGE_SEND_JOB_RETRY_OPTIONS, messageSendQueue } from '../queue/queues.js'
 
 // Rota autenticada (o hook global de apps/api/src/app.ts cuida do JWT/tenant — nenhuma
 // checagem de auth aqui). Cria o Message `queued` e enfileira o envio: a rota NUNCA
@@ -40,16 +40,22 @@ export function registerMessageRoutes(app: FastifyInstance): void {
       },
     })
 
-    await messageSendQueue.add(
-      'send',
-      { messageId: message.id, companyId },
-      {
-        jobId: message.id,
-        attempts: 3,
-        backoff: { type: 'exponential', delay: 2000 },
-        removeOnComplete: { age: 7 * 24 * 3600 },
-      },
-    )
+    try {
+      await messageSendQueue.add(
+        'send',
+        { messageId: message.id, companyId },
+        { jobId: message.id, ...MESSAGE_SEND_JOB_RETRY_OPTIONS },
+      )
+    } catch (err) {
+      // Diferente do webhook (que sempre responde 200 — o payload cru já está arquivado,
+      // ADR-0003): aqui o usuário PRECISA saber que o envio não foi confirmado agora — 500,
+      // não 202 (achado IMPORTANT da re-review T11). A Message já existe `queued`, porém:
+      // a varredura de reconciliação da subida do worker (queue/send-worker.ts) reenfileira
+      // sozinha qualquer `queued` órfã mais velha que 5min — o pior caso é atraso, nunca
+      // perda silenciosa.
+      req.log.error({ err, messageId: message.id }, 'falha ao enfileirar message-send — reconciliação cobre em até 5min')
+      return reply.code(500).send({ error: 'falha ao enfileirar envio' })
+    }
 
     return reply.code(202).send({ messageId: message.id })
   })

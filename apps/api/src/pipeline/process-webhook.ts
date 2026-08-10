@@ -4,13 +4,8 @@ import { canonicalizePhone, companiesRepo, getTenant, prisma, runWithTenant } fr
 import { parseProviderWebhook } from '@aios-pocket/providers'
 import { publishDomainEvent } from '../queue/events.js'
 import { isBlockedFailureAck, nextState } from './apply-status.js'
+import { isUniqueConstraintError } from './prisma-errors.js'
 import { resolveCustomer } from './resolve-customer.js'
-
-// Erro de unicidade do Postgres via Prisma (P2002) — checado por duck-typing para não
-// importar @prisma/client fora de packages/db (ESLint proíbe, ADR-0001).
-function isUniqueConstraintError(err: unknown): boolean {
-  return typeof err === 'object' && err !== null && (err as { code?: unknown }).code === 'P2002'
-}
 
 // RawWebhookEvent é tenant-exempt (packages/db/src/unsafe.ts) — funciona com ou sem
 // TenantContext ativo, então pode ser chamado tanto antes de entrar no runWithTenant

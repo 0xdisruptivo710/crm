@@ -28,3 +28,13 @@ export const WEBHOOK_JOB_RETRY_OPTIONS = {
   backoff: { type: 'exponential', delay: 2000 },
   removeOnComplete: { age: 7 * 24 * 3600 },
 } as const
+
+// Compartilhado entre a rota (apps/api/src/routes/messages.ts) e a varredura de
+// reconciliação de mensagens presas (queue/send-worker.ts, achado IMPORTANT da re-review
+// T11 — item 5): as duas precisam enfileirar `message-send` com as MESMAS opções,
+// nunca duas definições divergentes (regra do CLAUDE.md §4).
+export const MESSAGE_SEND_JOB_RETRY_OPTIONS = {
+  attempts: 3,
+  backoff: { type: 'exponential', delay: 2000 },
+  removeOnComplete: { age: 7 * 24 * 3600 },
+} as const

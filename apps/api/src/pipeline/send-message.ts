@@ -1,6 +1,7 @@
 import { companiesRepo, prisma, runWithTenant } from '@aios-pocket/db'
 import { providerForCompany } from '../provider-factory.js'
 import { publishDomainEvent } from '../queue/events.js'
+import { isUniqueConstraintError } from './prisma-errors.js'
 
 // Teto do fail_reason gravado no banco — mensagens de erro de provider podem vir enormes
 // (stack de HTTP client, corpo de resposta etc.); truncar evita uma coluna monstruosa.
@@ -14,17 +15,7 @@ function truncate(reason: string): string {
 // POST /messages. Chamado pelo worker de `message-send` (queue/send-worker.ts) com o
 // companyId que veio no payload do job — o worker roda fora de qualquer request HTTP
 // (sem TenantContext ainda), então abre o runWithTenant aqui, para TODO o resto da função.
-//
-// `attemptsMade` (job.attemptsMade do BullMQ) resolve uma ambiguidade da transição
-// atômica abaixo: na 1ª execução a linha está `queued` e o updateMany avança para
-// `sending` (count 1). Numa RETENTATIVA de verdade (BullMQ chamando de novo depois do
-// provider ter lançado na tentativa anterior) a linha já está `sending` — o updateMany
-// filtrado por `queued` dá count 0, mas isso NÃO é um job duplicado, é o fluxo normal de
-// retry, e precisa prosseguir e tentar enviar de novo. Só quando a linha já está
-// `sending` E esta é a PRIMEIRA tentativa (attemptsMade === 0) é que se trata de uma
-// execução concorrente/duplicada de verdade (ou a linha já está `sent`/`failed`) — nesses
-// casos, no-op idempotente.
-export async function sendQueuedMessage(messageId: string, companyId: string, attemptsMade: number): Promise<void> {
+export async function sendQueuedMessage(messageId: string, companyId: string): Promise<void> {
   await runWithTenant({ companyId }, async () => {
     const transitioned = await prisma.message.updateMany({
       where: { id: messageId, state: 'queued' },
@@ -32,10 +23,23 @@ export async function sendQueuedMessage(messageId: string, companyId: string, at
     })
 
     if (transitioned.count === 0) {
-      const current = await prisma.message.findFirst({ where: { id: messageId } })
-      if (!current) throw new Error(`message não encontrada: ${messageId}`)
-      const isRetryInFlight = current.state === 'sending' && attemptsMade > 0
-      if (!isRetryInFlight) return // já sent/failed, ou execução concorrente/duplicada — no-op
+      // Reentrada: a linha já não está `queued`. NUNCA reenviamos a partir daqui —
+      // removido o heurístico anterior baseado em `job.attemptsMade` (achado CRÍTICO da
+      // re-review T11, verificado contra o Lua/JS do bullmq@5.81.3): a recuperação de um
+      // job "stalled" pelo BullMQ NÃO incrementa attemptsMade, então um job recuperado
+      // reprocessava aqui com state=`sending` e attemptsMade=0 — o heurístico antigo
+      // classificava isso como "duplicado", devolvia sem lançar, e o BullMQ marcava o job
+      // como COMPLETED com a Message presa em `sending` para sempre, em silêncio. Sem
+      // como distinguir com certeza "retry legítimo" de "stalled" de "duplicata" só pelo
+      // estado da linha, a única postura segura é: se já saiu de `queued`, nunca reenviar
+      // (não há como saber se a chamada ao provider da tentativa anterior já foi ou não
+      // disparada de verdade — reenviar arriscaria um envio real duplicado ao cliente).
+      // Uma linha presa em `sending` fica visível e é resolvida pela varredura de
+      // reconciliação da subida do worker (queue/send-worker.ts) depois de 10 minutos —
+      // nunca silêncio, nunca reenvio automático.
+      const exists = await prisma.message.findFirst({ where: { id: messageId }, select: { id: true } })
+      if (!exists) throw new Error(`message não encontrada: ${messageId}`)
+      return
     }
 
     const message = await prisma.message.findFirst({
@@ -55,16 +59,35 @@ export async function sendQueuedMessage(messageId: string, companyId: string, at
 
     const provider = providerForCompany(company)
 
-    // Falha do provider PROPAGA (throw): o BullMQ tenta de novo (attempts: 3, backoff
-    // exponencial — configurados no enqueue da rota, apps/api/src/routes/messages.ts).
-    // Falha NUNCA silenciosa: o handler `worker.on('failed', ...)` de queue/send-worker.ts
-    // marca o estado terminal quando as tentativas se esgotam (ver markSendFailed abaixo).
+    // Falha do provider PROPAGA (throw): o BullMQ tenta de novo só se o erro acontecer
+    // ANTES da transição queued→sending ter sido persistida (ver comentário acima) —
+    // depois dela, qualquer retry é um no-op por design. Falha NUNCA silenciosa: o
+    // handler `worker.on('failed', ...)` de queue/send-worker.ts confirma via
+    // `job.isFailed()` (não por attemptsMade — outro achado da re-review T11, ver
+    // comentário lá) quando o job realmente terminou, e a varredura de reconciliação
+    // cobre qualquer linha presa em `sending` que nenhum evento resolveu.
     const result = await provider.sendText(customer.phoneE164.replace('+', ''), message.text ?? '')
 
-    await prisma.message.updateMany({
-      where: { id: messageId, state: 'sending' },
-      data: { state: 'sent', providerMessageId: result.providerMessageId },
-    })
+    try {
+      await prisma.message.updateMany({
+        where: { id: messageId, state: 'sending' },
+        data: { state: 'sent', providerMessageId: result.providerMessageId },
+      })
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err
+      // Corrida do eco (achado IMPORTANT da re-review T11): o webhook de eco (guarda
+      // fromMe de process-webhook.ts) processou o MESMO envio ANTES desta atualização —
+      // naquele momento nossa linha ainda tinha providerMessageId NULL, então a guarda não
+      // a reconheceu como eco e o pipeline inbound criou sua PRÓPRIA linha outbound já com
+      // o providerMessageId real. Esta atualização colide com ela na unique
+      // (companyId, provider, providerMessageId, direction). A linha do eco é a CANÔNICA
+      // — ela já carrega o providerMessageId certo e a timeline do pipeline inbound —
+      // então descartamos esta linha original (órfã: ainda `sending`, providerMessageId
+      // NULL) em vez de propagar o erro. Sucesso de verdade: a mensagem chegou ao
+      // cliente, só não é esta linha que registra isso.
+      await prisma.message.deleteMany({ where: { id: messageId, state: 'sending', providerMessageId: null } })
+      return
+    }
 
     // Timeline condicional (idempotente por correlationId, padrão T10): um retry que já
     // tinha conseguido gravar a timeline numa tentativa anterior não duplica.
@@ -104,9 +127,12 @@ export async function sendQueuedMessage(messageId: string, companyId: string, at
   })
 }
 
-// Chamado pelo handler `worker.on('failed', ...)` (queue/send-worker.ts) quando as
-// tentativas do BullMQ se esgotam — falha NUNCA silenciosa (regra do CLAUDE.md §4): o
-// Message não pode ficar preso em `sending` para sempre sem ninguém saber o motivo.
+// Chamado pelo handler `worker.on('failed', ...)` (queue/send-worker.ts) quando o job
+// termina de verdade (confirmado via `job.isFailed()`, não por contagem de tentativas) —
+// falha NUNCA silenciosa (regra do CLAUDE.md §4): o Message não pode ficar preso em
+// `sending` para sempre sem ninguém saber o motivo. Também chamado pela varredura de
+// reconciliação (queue/send-worker.ts) para linhas presas em `sending` há mais de 10min,
+// com o motivo fixo `'estado incerto (crash durante envio)'`.
 export async function markSendFailed(messageId: string, companyId: string, reason: string): Promise<void> {
   const failReason = truncate(reason)
   await runWithTenant({ companyId }, async () => {
