@@ -4,6 +4,11 @@
 
 FROM node:22-slim AS build
 RUN corepack enable
+# openssl TAMBÉM no estágio de build: o `prisma generate` detecta a libssl DESTE estágio
+# para escolher o binário da query engine. Sem openssl aqui, ele gera para openssl-1.1.x;
+# com openssl 3.x só no runtime, o Prisma procura o engine 3.0.x que não existe na imagem
+# → toda query falha com 500 (incidente pós-deploy do Plano B, 2026-08-11).
+RUN apt-get update -y && apt-get install -y openssl && rm -rf /var/lib/apt/lists/*
 WORKDIR /repo
 COPY pnpm-lock.yaml pnpm-workspace.yaml package.json turbo.json tsconfig.base.json ./
 COPY apps/api/package.json apps/api/
