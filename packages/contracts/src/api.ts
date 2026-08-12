@@ -1,5 +1,7 @@
 import { z } from 'zod'
-import { messageStateSchema, messageTypeSchema, providerSchema } from './webhooks.js'
+// Sem sufixo `.js` — ver comentário em index.ts deste pacote (exigência do Turbopack para
+// resolver o workspace package transpilado consumido pelo apps/web, Task 7 do Plano C).
+import { messageStateSchema, messageTypeSchema, providerSchema } from './webhooks'
 
 // Validação COMPARTILHADA entre web e api (regra do CLAUDE.md §4: "todo endpoint nasce
 // com validação Zod... compartilhada entre web e api"). Usado pela rota POST /messages

@@ -1,5 +1,6 @@
 import js from '@eslint/js'
 import tseslint from 'typescript-eslint'
+import reactHooks from 'eslint-plugin-react-hooks'
 
 // Arquivos de teste, usados em mais de um bloco abaixo (evita duplicar o glob).
 const TEST_GLOBS = ['**/test/**', '**/*.test.ts', '**/*.test.tsx']
@@ -21,6 +22,21 @@ export default tseslint.config(
     rules: {
       '@typescript-eslint/no-explicit-any': 'error',
       '@typescript-eslint/no-unused-vars': ['error', { ignoreRestSiblings: true }],
+    },
+  },
+  {
+    // react-hooks só se aplica a apps/web (única app React do monorepo). Reintroduzido na
+    // Task 7 do Plano C (revisão da T6, requisito Important): a remoção do
+    // eslint-config-next ficou correta, mas sem ele nada pega stale closures em
+    // hooks/effects — risco real no Inbox (handlers de dados + polling em
+    // conversation-list/conversation-view/instance-badge). Só as duas regras pedidas —
+    // NÃO o preset `recommended-latest` inteiro do plugin (que hoje inclui regras extras
+    // voltadas ao React Compiler, fora do escopo deste ajuste).
+    files: ['apps/web/**/*.ts', 'apps/web/**/*.tsx'],
+    plugins: { 'react-hooks': reactHooks },
+    rules: {
+      'react-hooks/rules-of-hooks': 'error',
+      'react-hooks/exhaustive-deps': 'error',
     },
   },
   // ATENÇÃO: no flat config do ESLint, quando dois blocos casam com o mesmo arquivo e
