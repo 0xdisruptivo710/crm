@@ -163,7 +163,7 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
       method: 'POST',
       url: '/messages',
       headers: { authorization: 'Bearer qualquer-token' },
-      payload: { conversationId: conversationBId, text: 'não deveria funcionar' },
+      payload: { conversationId: conversationBId, clientMessageId: randomUUID(), text: 'não deveria funcionar' },
     })
     expect(res.statusCode).toBe(404)
   })
@@ -174,12 +174,13 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
       return { providerMessageId: 'FAKE123' }
     }
     const addSpy = vi.spyOn(messageSendQueue, 'add')
+    const clientMessageId = randomUUID()
 
     const res = await app.inject({
       method: 'POST',
       url: '/messages',
       headers: { authorization: 'Bearer qualquer-token' },
-      payload: { conversationId, text: 'resposta de teste do Aios Pocket' },
+      payload: { conversationId, clientMessageId, text: 'resposta de teste do Aios Pocket' },
     })
 
     expect(res.statusCode).toBe(202)
@@ -193,6 +194,7 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
     expect(message?.type).toBe('text')
     expect(message?.text).toBe('resposta de teste do Aios Pocket')
     expect(message?.companyId).toBe(companyId)
+    expect(message?.clientMessageId).toBe(clientMessageId)
 
     expect(addSpy).toHaveBeenCalledWith(
       'send',
@@ -209,6 +211,41 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
     await prismaUnsafe.message.deleteMany({ where: { id: body.messageId } })
   })
 
+  it('POST duplicado com o MESMO clientMessageId não cria segunda linha — devolve o messageId ORIGINAL (idempotência do envio, fecha o "202 dangling" da review do Plano B)', async () => {
+    const clientMessageId = randomUUID()
+    const payload = { conversationId, clientMessageId, text: 'mensagem idempotente' }
+    const addSpy = vi.spyOn(messageSendQueue, 'add')
+
+    const first = await app.inject({
+      method: 'POST',
+      url: '/messages',
+      headers: { authorization: 'Bearer qualquer-token' },
+      payload,
+    })
+    expect(first.statusCode).toBe(202)
+    const firstBody = first.json() as { messageId: string }
+
+    const second = await app.inject({
+      method: 'POST',
+      url: '/messages',
+      headers: { authorization: 'Bearer qualquer-token' },
+      payload,
+    })
+    expect(second.statusCode).toBe(202)
+    const secondBody = second.json() as { messageId: string }
+
+    expect(secondBody.messageId).toBe(firstBody.messageId) // MESMO messageId — retry não gera novo id
+
+    const rows = await prismaUnsafe.message.findMany({ where: { companyId, clientMessageId } })
+    expect(rows).toHaveLength(1) // uma única linha, apesar dos dois POSTs
+
+    // Enfileira só na 1ª tentativa — a 2ª é reconhecida como duplicata antes de chegar lá.
+    expect(addSpy).toHaveBeenCalledTimes(1)
+
+    addSpy.mockRestore()
+    await prismaUnsafe.message.deleteMany({ where: { id: firstBody.messageId } })
+  })
+
   it('falha ao enfileirar: responde 500 (usuário precisa saber, diferente do webhook) — Message fica queued para a varredura de reconciliação cobrir (achado IMPORTANT da re-review T11, item 5)', async () => {
     const addSpy = vi.spyOn(messageSendQueue, 'add').mockRejectedValueOnce(new Error('redis fora do ar (simulado)'))
 
@@ -216,7 +253,7 @@ describe('POST /messages (rota autenticada — ADR-0006)', () => {
       method: 'POST',
       url: '/messages',
       headers: { authorization: 'Bearer qualquer-token' },
-      payload: { conversationId, text: 'vai falhar ao enfileirar' },
+      payload: { conversationId, clientMessageId: randomUUID(), text: 'vai falhar ao enfileirar' },
     })
     expect(res.statusCode).toBe(500)
     addSpy.mockRestore()

@@ -3,6 +3,7 @@ import type { FastifyInstance } from 'fastify'
 import { sendMessageRequestSchema } from '@aios-pocket/contracts'
 import { getTenant, prisma } from '@aios-pocket/db'
 import { MESSAGE_SEND_JOB_RETRY_OPTIONS, messageSendQueue } from '../queue/queues.js'
+import { isUniqueConstraintError } from '../pipeline/prisma-errors.js'
 
 // Rota autenticada (o hook global de apps/api/src/app.ts cuida do JWT/tenant — nenhuma
 // checagem de auth aqui). Cria o Message `queued` e enfileira o envio: a rota NUNCA
@@ -16,7 +17,7 @@ export function registerMessageRoutes(app: FastifyInstance): void {
       return reply.code(400).send({ error: 'payload inválido', issues })
     }
 
-    const { conversationId, text } = parsed.data
+    const { conversationId, clientMessageId, text } = parsed.data
     const { companyId } = getTenant()
 
     // Client tenantizado (packages/db/src/client.ts) injeta `companyId` no where — uma
@@ -25,20 +26,35 @@ export function registerMessageRoutes(app: FastifyInstance): void {
     const conversation = await prisma.conversation.findFirst({ where: { id: conversationId } })
     if (!conversation) return reply.code(404).send({ error: 'conversa não encontrada' })
 
-    const message = await prisma.message.create({
-      data: {
-        companyId,
-        conversationId: conversation.id,
-        direction: 'outbound',
-        state: 'queued',
-        // provider = o mesmo da Conversation (CUIDADO da Task 11: o client tenantizado não
-        // lê Company — a Conversation já carrega o provider certo, sem query extra).
-        provider: conversation.provider,
-        type: 'text',
-        text,
-        correlationId: randomUUID(),
-      },
-    })
+    let message
+    try {
+      message = await prisma.message.create({
+        data: {
+          companyId,
+          conversationId: conversation.id,
+          direction: 'outbound',
+          state: 'queued',
+          // provider = o mesmo da Conversation (CUIDADO da Task 11: o client tenantizado não
+          // lê Company — a Conversation já carrega o provider certo, sem query extra).
+          provider: conversation.provider,
+          type: 'text',
+          text,
+          clientMessageId,
+          correlationId: randomUUID(),
+        },
+      })
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err
+      // Dedupe por clientMessageId (unique [companyId, clientMessageId], Task 4): request
+      // duplicado — retry de rede, duplo clique do usuário — bate na unique em vez de criar
+      // uma segunda linha. Relê e devolve o messageId ORIGINAL sem reenfileirar de novo (o
+      // envio original já está — ou já esteve — na fila); mesmo padrão de readback por
+      // P2002 usado em process-webhook.ts/resolve-customer.ts (prisma-errors.ts), fecha o
+      // "202 dangling" apontado na review do Plano B.
+      const existing = await prisma.message.findFirst({ where: { clientMessageId } })
+      if (!existing) throw err // não deveria acontecer: é exatamente essa unique que disparou o P2002
+      return reply.code(202).send({ messageId: existing.id })
+    }
 
     try {
       await messageSendQueue.add(

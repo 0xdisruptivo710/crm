@@ -129,6 +129,11 @@ model Message {
   provider                 Provider
   providerMessageId        String?          @map("provider_message_id")
   fromMe                   Boolean          @default(false) @map("from_me")
+  // Chave de idempotência do envio (Task 4, Plano C): a UI sempre gera via
+  // crypto.randomUUID() em POST /messages. Nullable — mensagens inbound (webhook) nunca a
+  // preenchem; NULLs são distintos para o Postgres em índice único, então não colidem entre
+  // si (nenhum backfill necessário nas linhas existentes).
+  clientMessageId          String?          @map("client_message_id")
   type                     MessageType
   text                     String?
   editedText               String?          @map("edited_text")
@@ -144,6 +149,7 @@ model Message {
   conversation Conversation @relation(fields: [conversationId], references: [id])
 
   @@unique([companyId, provider, providerMessageId, direction])
+  @@unique([companyId, clientMessageId])
   @@index([conversationId, createdAt])
   @@map("messages")
 }
