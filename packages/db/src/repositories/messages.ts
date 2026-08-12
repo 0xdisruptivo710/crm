@@ -1,3 +1,4 @@
+import { prisma } from '../client.js'
 import { prismaUnsafe } from '../unsafe.js'
 
 // PRÉ-TENANT sancionado (como companiesRepo, packages/db/src/repositories/companies.ts):
@@ -30,6 +31,16 @@ export const messagesRepo = {
       where: { state: 'sending', createdAt: { lt: olderThan }, ...(companyId ? { companyId } : {}) },
       select: { id: true, companyId: true },
       take: STUCK_ROW_LIMIT,
+    })
+  },
+  // Tenant-safe (client `prisma`, não `prismaUnsafe`): usado por GET /conversations/:id/messages
+  // (Task 5, Plano C). A rota já validou que a Conversation pertence ao tenant atual
+  // (mesmo padrão de POST /messages em apps/api/src/routes/messages.ts) — aqui só lista.
+  listByConversation(conversationId: string, limit: number) {
+    return prisma.message.findMany({
+      where: { conversationId },
+      orderBy: { createdAt: 'asc' },
+      take: limit,
     })
   },
 }
