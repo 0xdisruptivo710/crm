@@ -29,6 +29,11 @@ jobs:
       REDIS_URL: redis://localhost:6379
       SUPABASE_URL: https://example.supabase.co
       APP_ENCRYPTION_KEY: CTsyIGgQZbdhAtVZDdWLmeYUFrsGxJCVyBqNbGVw5CE=
+      # Dummies só para o `next build` conseguir rodar no CI (apps/web) — nenhum
+      # valor real trafega aqui; produção lê as envs de verdade na Vercel.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ci-dummy-anon-key
+      NEXT_PUBLIC_API_URL: https://example.invalid
     steps:
       - uses: actions/checkout@v5
       - uses: pnpm/action-setup@v6
@@ -56,3 +61,5 @@ jobs:
       - run: pnpm lint
       - run: pnpm test
       - run: pnpm test:arch
+      # Pega erro de build do Next (apps/web) — barato, roda só o pacote web.
+      - run: pnpm --filter web build

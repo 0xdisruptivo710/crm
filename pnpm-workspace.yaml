@@ -1,3 +1,9 @@
 packages:
   - "apps/*"
   - "packages/*"
+
+# unrs-resolver/sharp têm build scripts nativos (via shadcn/Next) — sem risco
+# conhecido, mas não precisam rodar; silencia o aviso "Ignored build scripts".
+ignoredBuiltDependencies:
+  - sharp
+  - unrs-resolver

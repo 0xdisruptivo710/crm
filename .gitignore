@@ -9,6 +9,8 @@ coverage/
 .env
 .env.*
 !.env.example
+# Explícito para qualquer subpasta (apps/web etc.) — reforça o .env.* acima.
+**/.env.local
 
 # Sistema
 desktop.ini
