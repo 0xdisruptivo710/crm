@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useRef, useState } from "react"
 import type { ConversationSummary, MessageView } from "@aios-pocket/contracts"
 import { ApiError, getMessages } from "@/lib/api"
 import { Button } from "@/components/ui/button"
@@ -26,23 +26,40 @@ export function ConversationView({
   const [status, setStatus] = useState<Status>("loading")
   const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
+  // Guarda de staleness (fix round 1 — Important da revisão): load()/poll/refresh manual
+  // são todos assíncronos e podem resolver DEPOIS que o usuário já trocou de conversa. Sem
+  // isto, uma resposta tardia da conversa ANTERIOR sobrescreve `messages` da conversa NOVA
+  // por até um ciclo de poll (~15s) — o reset síncrono abaixo só cobre o instante da troca,
+  // não uma resolução tardia em voo. Mesmo padrão `ref` de lib/supabase/use-access-token.ts
+  // (lá era `active`/cleanup de effect; aqui é o id da conversa corrente, checado depois de
+  // cada await antes de qualquer setState).
+  const currentConversationIdRef = useRef<string | null>(null)
+
   const load = useCallback(async () => {
     if (!accessToken || !conversation) return
+    const requestedConversationId = conversation.id
     setStatus((prev) => (prev === "ready" ? prev : "loading"))
     try {
-      const result = await getMessages(accessToken, conversation.id)
+      const result = await getMessages(accessToken, requestedConversationId)
+      // A conversa selecionada já mudou de novo enquanto este fetch estava em voo —
+      // descarta a resposta (pertence a uma conversa que não é mais a exibida).
+      if (currentConversationIdRef.current !== requestedConversationId) return
       setMessages(result)
       setStatus("ready")
       setErrorMessage(null)
     } catch (err) {
+      if (currentConversationIdRef.current !== requestedConversationId) return
       setErrorMessage(err instanceof ApiError ? err.message : "Falha ao carregar mensagens.")
       setStatus("error")
     }
   }, [accessToken, conversation])
 
   // Limpa a conversa anterior IMEDIATAMENTE ao trocar de seleção — sem isto a tela mostra
-  // mensagens da conversa errada até o fetch da nova resolver (estados honestos).
+  // mensagens da conversa errada até o fetch da nova resolver (estados honestos). Também
+  // atualiza a ref de staleness ANTES de qualquer load() da conversa nova poder disparar
+  // (effects rodam em ordem de declaração no mesmo commit — ver efeito seguinte).
   useEffect(() => {
+    currentConversationIdRef.current = conversation?.id ?? null
     setMessages([])
     setStatus("loading")
     setErrorMessage(null)
