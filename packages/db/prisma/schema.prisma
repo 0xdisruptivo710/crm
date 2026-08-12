@@ -1,5 +1,9 @@
 generator client {
   provider = "prisma-client-js"
+  // "native" cobre dev local (Windows) e CI; o target explícito garante o engine
+  // debian-openssl-3.0.x dentro da imagem Docker independentemente da libssl
+  // detectada no estágio de build (incidente pós-deploy do Plano B, 2026-08-11).
+  binaryTargets = ["native", "debian-openssl-3.0.x"]
 }
 
 datasource db {
