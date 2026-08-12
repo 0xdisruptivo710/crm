@@ -24,6 +24,12 @@ export function startWebhookWorker(): Worker {
     { connection: redisWorkerConnection },
   )
 
+  // Hardening batch C, Step 1: o evento 'error' do Worker (erro de INFRA — ex.: conexão
+  // com o Redis) é diferente do evento 'failed' (um JOB específico que lançou). Sem este
+  // handler, um EventEmitter que recebe 'error' sem listener derruba o processo Node
+  // inteiro — fatal aqui porque API e workers vivem no MESMO processo (CLAUDE.md §2).
+  worker.on('error', (err) => console.error('[webhook worker] erro do worker bullmq', err.message))
+
   // Roda uma vez na subida do processo — não é um cron, é a rede de segurança do
   // restart para o cenário órfão descrito na revisão da Task 6.
   void reconcileUnprocessedWebhooks().catch((err: unknown) => {

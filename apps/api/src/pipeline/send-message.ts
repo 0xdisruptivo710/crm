@@ -113,27 +113,39 @@ export async function sendQueuedMessage(messageId: string, companyId: string): P
     }
 
     // Timeline condicional (idempotente por correlationId, padrão T10): um retry que já
-    // tinha conseguido gravar a timeline numa tentativa anterior não duplica.
+    // tinha conseguido gravar a timeline numa tentativa anterior não duplica. Hardening
+    // batch C, Step 3 (TOCTOU, achado da review do Plano B): o findFirst-depois-create tem
+    // uma janela entre leitura e escrita — o índice único parcial `customer_events_dedupe_idx`
+    // (migração 20260812015258_customer_events_dedupe_idx) fecha essa janela no BANCO; o
+    // catch de P2002 trata a colisão como no-op, mesmo padrão do dedupe de Message já usado
+    // acima (corrida do eco) e em process-webhook.ts.
     const existingTimeline = await prisma.customerEvent.findFirst({
       where: { customerId: customer.id, type: 'message_sent', correlationId: message.correlationId },
     })
     if (!existingTimeline) {
-      await prisma.customerEvent.create({
-        data: {
-          companyId,
-          customerId: customer.id,
-          type: 'message_sent',
-          payload: {
-            messageId: message.id,
-            conversationId: conversation.id,
-            provider: company.activeProvider,
-            providerMessageId: result.providerMessageId,
+      try {
+        await prisma.customerEvent.create({
+          data: {
+            companyId,
+            customerId: customer.id,
+            type: 'message_sent',
+            payload: {
+              messageId: message.id,
+              conversationId: conversation.id,
+              provider: company.activeProvider,
+              providerMessageId: result.providerMessageId,
+            },
+            schemaVersion: 1,
+            correlationId: message.correlationId,
+            occurredAt: new Date(),
           },
-          schemaVersion: 1,
-          correlationId: message.correlationId,
-          occurredAt: new Date(),
-        },
-      })
+        })
+      } catch (err) {
+        if (!isUniqueConstraintError(err)) throw err
+        // Outra execução concorrente (mesmo correlationId, mesma Message) venceu a
+        // corrida entre o findFirst acima e este create — no-op, a linha dela é a
+        // timeline de verdade (índice único parcial garante que só uma existe).
+      }
     }
 
     // Publicado depois dos writes de domínio (ADR-0004), com o correlationId ESTÁVEL da

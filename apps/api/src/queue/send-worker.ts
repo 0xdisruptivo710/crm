@@ -55,6 +55,12 @@ export function startSendWorker(): Worker {
     })
   })
 
+  // Hardening batch C, Step 1: o evento 'error' do Worker (erro de INFRA — ex.: conexão
+  // com o Redis) é DIFERENTE do evento 'failed' acima (um JOB específico que lançou). Sem
+  // este handler, um EventEmitter que recebe 'error' sem listener derruba o processo Node
+  // inteiro — fatal aqui porque API e workers vivem no MESMO processo (CLAUDE.md §2).
+  worker.on('error', (err) => console.error('[send worker] erro do worker bullmq', err.message))
+
   void reconcileStuckMessages()
     .catch((err: unknown) => {
       console.error('[send worker] falha ao reconciliar mensagens presas na subida', err)
@@ -150,14 +156,25 @@ async function reenqueueSend(message: StuckMessage): Promise<void> {
 // ACABOU de virar `sending` de verdade (envio genuinamente em voo AGORA) podia ter
 // `createdAt` mais velho que SENDING_STUCK_MS (ficou `queued` muito tempo antes de
 // finalmente ser pega por um worker) e seria marcada `failed` por engano pela varredura —
-// descartando o providerMessageId real quando o eco da Evolution chegasse depois. Consulta
-// o BullMQ diretamente: se o jobId (= messageId) ainda está active/waiting/delayed, o
-// envio está genuinamente em andamento (ou prestes a rodar) — não é órfão.
+// descartando o providerMessageId real quando o eco da Evolution chegasse depois.
+//
+// Hardening batch C, Step 2 (achado da review do Plano B): a versão anterior chamava
+// `messageSendQueue.getJobs(['active', 'waiting', 'delayed'])`, que carrega a fila
+// INTEIRA nesses estados em memória a cada rodada de varredura — custo que cresce sem
+// limite com o volume de envios em voo, não com o tamanho do lote que estamos checando.
+// `getJobState(jobId)` consulta o Redis diretamente PELO id (=messageId), uma chamada por
+// linha candidata — o batch já vem limitado a STUCK_ROW_LIMIT=500 (messagesRepo, packages/
+// db/src/repositories/messages.ts), então isto é no máximo 500 chamadas por varredura,
+// nunca proporcional ao tamanho da fila.
+const IN_FLIGHT_STATES = new Set(['active', 'waiting', 'delayed'])
+
 async function excludeInFlight(rows: StuckMessage[]): Promise<StuckMessage[]> {
   if (rows.length === 0) return rows
-  const inFlight = await messageSendQueue.getJobs(['active', 'waiting', 'delayed'])
-  const inFlightIds = new Set(inFlight.map((job) => job.id))
-  return rows.filter((row) => !inFlightIds.has(row.id))
+  const states = await Promise.all(rows.map((row) => messageSendQueue.getJobState(row.id)))
+  return rows.filter((_row, index) => {
+    const state = states[index]
+    return state === undefined || !IN_FLIGHT_STATES.has(state)
+  })
 }
 
 // Varredura de reconciliação (achado CRÍTICO/IMPORTANT da re-review T11, itens 1 e 5):

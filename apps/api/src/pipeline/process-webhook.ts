@@ -120,36 +120,57 @@ async function handleIncomingMessage(companyId: string, msg: IncomingMessage): P
   }
 
   // Timeline condicional (idempotente por correlationId): um retry que já tinha
-  // conseguido gravar a timeline numa tentativa anterior não duplica.
+  // conseguido gravar a timeline numa tentativa anterior não duplica. Hardening batch C,
+  // Step 3 (TOCTOU, achado da review do Plano B): o findFirst-depois-create abaixo tem uma
+  // janela entre a leitura e a escrita — o índice único parcial `customer_events_dedupe_idx`
+  // (migração 20260812015258_customer_events_dedupe_idx) fecha essa janela no BANCO; o
+  // catch de P2002 trata a colisão como no-op, mesmo padrão já usado para o dedupe de
+  // Message logo acima.
   const timelineType = msg.fromMe ? 'message_sent_from_phone' : 'message_received'
   const existingTimeline = await prisma.customerEvent.findFirst({
     where: { customerId: customer.id, type: timelineType, correlationId },
   })
   if (!existingTimeline) {
-    await prisma.customerEvent.create({
-      data: {
-        companyId,
-        customerId: customer.id,
-        type: timelineType,
-        payload: {
-          messageId: message.id,
-          conversationId: conversation.id,
-          provider: msg.provider,
-          providerMessageId: msg.providerMessageId,
+    try {
+      await prisma.customerEvent.create({
+        data: {
+          companyId,
+          customerId: customer.id,
+          type: timelineType,
+          payload: {
+            messageId: message.id,
+            conversationId: conversation.id,
+            provider: msg.provider,
+            providerMessageId: msg.providerMessageId,
+          },
+          schemaVersion: 1,
+          correlationId,
+          occurredAt: msg.timestamp,
         },
-        schemaVersion: 1,
-        correlationId,
-        occurredAt: msg.timestamp,
-      },
-    })
+      })
+    } catch (err) {
+      if (!isUniqueConstraintError(err)) throw err
+      // Outra execução concorrente (mesmo correlationId/type) venceu a corrida entre o
+      // findFirst acima e este create — o índice único parcial garante que só uma linha
+      // existe; no-op aqui, a linha dela já é a timeline de verdade.
+    }
   }
 
   // Publicado depois dos writes de domínio (ADR-0004). correlationId agora é ESTÁVEL
   // entre tentativas (o da Message, nunca um novo por chamada) — o jobId de
   // publishDomainEvent (`${name}-${correlationId}`) fica estável também, então um
   // retry aqui é um no-op de verdade para o BullMQ, não uma republicação despistada.
+  //
+  // Hardening batch C, Step 4 (carry-over do Plano A/B — naming de MessageReceived
+  // documentado em docs/superpowers/2026-08-08-plano-a-carryover.md): `MessageReceived`
+  // sugere "recebido do cliente", mas até aqui também era publicado quando o humano
+  // responde pelo PRÓPRIO celular (fromMe=true, ver guarda de eco acima — isto só roda
+  // para o registro CANÔNICO de um envio pelo celular, não para o eco do envio pela API).
+  // `MessageSentFromPhone` ganha nome próprio para esse caso; `MessageReceived` volta a
+  // significar só cliente→empresa. Nenhum consumer registrado ainda (getHandlers vazio
+  // para os dois nomes) — rename seguro, sem migração de consumer.
   await publishDomainEvent({
-    name: 'MessageReceived',
+    name: msg.fromMe ? 'MessageSentFromPhone' : 'MessageReceived',
     companyId,
     correlationId,
     schemaVersion: 1,

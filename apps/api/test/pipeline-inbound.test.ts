@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto'
 import { readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest'
@@ -60,9 +61,17 @@ afterAll(async () => {
 
 describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline (ADR-0004/0006)', () => {
   it('incoming_text-1: cria Customer (E.164 sintético), Conversation e Message inbound/received', async () => {
+    // Hardening batch C, Step 4: MessageReceived volta a significar SÓ cliente→empresa —
+    // esta fixture (fromMe=false) publica MessageReceived, nunca MessageSentFromPhone.
+    const addSpy = vi.spyOn(domainEventsQueue, 'add')
+
     const raw = await ingest('incoming_text-1')
     expect(raw?.processed).toBe(true)
     expect(raw?.error).toBeNull()
+
+    const publishedNames = addSpy.mock.calls.map((call) => (call[1] as { name?: string } | undefined)?.name)
+    expect(publishedNames).toContain('MessageReceived')
+    expect(publishedNames).not.toContain('MessageSentFromPhone')
 
     const customer = await prismaUnsafe.customer.findFirst({ where: { companyId, phoneE164: '+5511999990006' } })
     expect(customer).not.toBeNull()
@@ -106,7 +115,9 @@ describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline 
     expect(messagesAfter).toBe(messagesBefore)
   })
 
-  it('incoming_from_me-1: mesma conversa, mensagem vira outbound/sent', async () => {
+  it('incoming_from_me-1: mesma conversa, mensagem vira outbound/sent; publica MessageSentFromPhone (nome próprio, Hardening batch C Step 4)', async () => {
+    const addSpy = vi.spyOn(domainEventsQueue, 'add')
+
     await ingest('incoming_from_me-1')
     // id exato da fixture (ver tests/providers/fixtures/evolution/incoming_from_me-1.json)
     const message = await prismaUnsafe.message.findFirst({
@@ -121,6 +132,13 @@ describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline 
       where: { companyId, customerId: customer?.id, type: 'message_sent_from_phone' },
     })
     expect(timeline).not.toBeNull()
+
+    // fromMe publica MessageSentFromPhone, NUNCA MessageReceived (rename da Step 4 — antes
+    // deste fix, o humano respondendo pelo próprio celular publicava MessageReceived, nome
+    // que sugere "cliente escreveu", enganando qualquer consumer futuro).
+    const publishedNames = addSpy.mock.calls.map((call) => (call[1] as { name?: string } | undefined)?.name)
+    expect(publishedNames).toContain('MessageSentFromPhone')
+    expect(publishedNames).not.toContain('MessageReceived')
   })
 
   it('incoming_audio-1: campos de mídia populados', async () => {
@@ -404,5 +422,82 @@ describe('pipeline inbound: webhook vira Customer/Conversation/Message/Timeline 
       where: { companyId, provider: 'evolution', providerMessageId: 'POISON-JID-BROADCAST-1' },
     })
     expect(message).toBeNull() // pipeline parou antes de chegar no insert de Message
+  })
+})
+
+describe('índice único parcial customer_events_dedupe_idx (Hardening batch C, Step 3 — TOCTOU do timeline condicional)', () => {
+  it('bloqueia um INSERT duplicado de (company_id, customer_id, type, correlation_id) num type coberto — prova que o índice existe e funciona no banco, não só no findFirst do código', async () => {
+    const customer = await prismaUnsafe.customer.create({
+      data: { companyId, phoneE164: '+5511999998888', phoneOriginal: '5511999998888' },
+    })
+    const correlationId = randomUUID()
+    const data = {
+      companyId,
+      customerId: customer.id,
+      type: 'message_received',
+      payload: {},
+      schemaVersion: 1,
+      correlationId,
+      occurredAt: new Date(),
+    }
+    await prismaUnsafe.customerEvent.create({ data })
+
+    // Mesma tupla exata de novo — sem passar pelo findFirst do código, direto no banco.
+    // Se o índice não existisse (ou não fosse único), isto criaria uma segunda linha.
+    await expect(prismaUnsafe.customerEvent.create({ data })).rejects.toMatchObject({ code: 'P2002' })
+
+    const count = await prismaUnsafe.customerEvent.count({ where: { customerId: customer.id, type: 'message_received', correlationId } })
+    expect(count).toBe(1) // só a primeira linha sobrevive
+
+    await prismaUnsafe.customerEvent.deleteMany({ where: { customerId: customer.id } })
+    await prismaUnsafe.customer.deleteMany({ where: { id: customer.id } })
+  })
+
+  it('NÃO bloqueia o MESMO correlationId num type de TRANSIÇÃO DE ESTADO (fora do índice de propósito — nota do Step 3): sent→delivered→read da mesma Message repetem correlationId legitimamente', async () => {
+    const customer = await prismaUnsafe.customer.create({
+      data: { companyId, phoneE164: '+5511999998889', phoneOriginal: '5511999998889' },
+    })
+    const correlationId = randomUUID()
+
+    // Ponto de origem da timeline desta Message (type coberto pelo índice).
+    await prismaUnsafe.customerEvent.create({
+      data: { companyId, customerId: customer.id, type: 'message_sent', payload: {}, schemaVersion: 1, correlationId, occurredAt: new Date() },
+    })
+
+    // Duas transições de status distintas, MESMO correlationId — message_status_changed
+    // fica FORA do índice de propósito, então nenhuma das duas colide com a outra nem com
+    // a linha message_sent acima.
+    await expect(
+      prismaUnsafe.customerEvent.create({
+        data: {
+          companyId,
+          customerId: customer.id,
+          type: 'message_status_changed',
+          payload: { newState: 'delivered' },
+          schemaVersion: 1,
+          correlationId,
+          occurredAt: new Date(),
+        },
+      }),
+    ).resolves.toBeDefined()
+    await expect(
+      prismaUnsafe.customerEvent.create({
+        data: {
+          companyId,
+          customerId: customer.id,
+          type: 'message_status_changed',
+          payload: { newState: 'read' },
+          schemaVersion: 1,
+          correlationId,
+          occurredAt: new Date(),
+        },
+      }),
+    ).resolves.toBeDefined()
+
+    const count = await prismaUnsafe.customerEvent.count({ where: { customerId: customer.id, correlationId } })
+    expect(count).toBe(3) // message_sent + 2 transições de status, todas convivendo
+
+    await prismaUnsafe.customerEvent.deleteMany({ where: { customerId: customer.id } })
+    await prismaUnsafe.customer.deleteMany({ where: { id: customer.id } })
   })
 })
