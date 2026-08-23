@@ -1,6 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import Fastify, { type FastifyInstance } from 'fastify'
+import fastifyCors from '@fastify/cors'
 import { runWithTenant, getTenant, resolveUserByAuthId } from '@aios-pocket/db'
+import { config } from './config.js'
 import { verifySupabaseJwt } from './auth/verify.js'
 import { registerConversationRoutes } from './routes/conversations.js'
 import { registerMessageRoutes } from './routes/messages.js'
@@ -21,6 +23,22 @@ function isPublicUrl(url: string): boolean {
 
 export function buildApp(): FastifyInstance {
   const app = Fastify({ logger: true, genReqId: () => randomUUID() })
+
+  // CORS para o browser do inbox (Task 9 do Plano C — metade "código" adiantada na T8,
+  // que precisa da prova via browser; o deploy/envs do EasyPanel continuam na T9).
+  // Registrado SOMENTE quando WEB_ORIGIN existe — ausente, nenhuma origem cross-site é
+  // liberada (paridade com o comportamento anterior). Ordem dos hooks: plugins carregam
+  // no ready, então o hook do @fastify/cors roda DEPOIS do hook de auth abaixo — por isso
+  // o auth libera OPTIONS (preflight é anônimo por especificação, nunca traz Authorization)
+  // para o plugin responder. Limitação aceita e documentada: respostas 401 emitidas pelo
+  // próprio hook de auth saem SEM headers de CORS (o hook do plugin nunca roda quando a
+  // request morre antes dele) — o browser reporta como falha de rede em vez de 401; caso
+  // raro (o supabase-js renova o token sozinho) e fail-closed.
+  if (config.WEB_ORIGIN) {
+    void app.register(fastifyCors, {
+      origin: config.WEB_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean),
+    })
+  }
 
   // Hook em estilo callback (não async) registrado em onRequest, não preHandler.
   //
@@ -44,6 +62,10 @@ export function buildApp(): FastifyInstance {
   // toda a cadeia assíncrona subsequente — incluindo qualquer `await` dentro do
   // handler — nasce dentro do AsyncLocalStorage e o herda corretamente.
   app.addHook('onRequest', (req, reply, done) => {
+    // Preflight CORS: OPTIONS é anônimo por especificação (nunca carrega Authorization) —
+    // deixa passar para o @fastify/cors (registrado acima) responder. Sem WEB_ORIGIN
+    // definida não há handler de OPTIONS e a request cai no 404 padrão (fail-closed).
+    if (req.method === 'OPTIONS') return done()
     if (isPublicUrl(req.url)) return done()
     const header = req.headers.authorization
     if (!header?.startsWith('Bearer ')) {

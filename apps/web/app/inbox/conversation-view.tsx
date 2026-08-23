@@ -8,19 +8,21 @@ import { cn } from "@/lib/utils"
 import { Composer } from "./composer"
 import { displayName, formatTime } from "./format"
 
-const POLL_INTERVAL_MS = 15_000
-
 type Status = "loading" | "error" | "ready"
 
-// Conversa aberta (Task 7, spec §7): bolhas de mensagem + composer. Sem realtime ainda
-// (T8 substitui por Supabase Realtime, ADR-0005) — poll leve de 15s enquanto a conversa
-// está aberta, mais um botão de atualizar manual, como ponte.
+// Conversa aberta (Task 7, spec §7): bolhas de mensagem + composer. Realtime (Task 8,
+// ADR-0005): o poll de 15s da ponte saiu — `refreshVersion` é incrementado pela página
+// quando o Supabase Realtime sinaliza INSERT/UPDATE de mensagem DESTA conversa (mensagem
+// nova aparece sem refresh; acks atualizam os ✓), e cada incremento refaz o fetch na API.
+// O botão de atualizar manual permanece como escape hatch.
 export function ConversationView({
   accessToken,
   conversation,
+  refreshVersion,
 }: {
   accessToken: string | null
   conversation: ConversationSummary | null
+  refreshVersion: number
 }) {
   const [messages, setMessages] = useState<MessageView[]>([])
   const [status, setStatus] = useState<Status>("loading")
@@ -68,12 +70,13 @@ export function ConversationView({
   useEffect(() => {
     if (!conversation) return
     load()
-    const interval = setInterval(load, POLL_INTERVAL_MS)
-    return () => clearInterval(interval)
-  }, [conversation, load])
+  }, [conversation, load, refreshVersion])
 
   function appendOptimistic(message: MessageView) {
-    setMessages((prev) => [...prev, message])
+    // Dedupe por id contra o estado local (Task 8): o INSERT da linha real pode chegar via
+    // realtime → refetch ANTES do 202 do POST resolver — se a mensagem já está na lista
+    // (mesmo id, vindo da API), o append otimista viraria uma duplicata visível.
+    setMessages((prev) => (prev.some((m) => m.id === message.id) ? prev : [...prev, message]))
   }
 
   if (!conversation) {

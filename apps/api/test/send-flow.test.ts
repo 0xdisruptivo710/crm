@@ -427,7 +427,10 @@ describe('sendQueuedMessage (worker `message-send` — máquina de estados, ADR-
       where: { companyId, provider: 'evolution', providerMessageId: 'FAKE-RACE-1', direction: 'outbound' },
     })
     expect(outboundRows).toHaveLength(1) // exatamente uma linha sobrevive: a do eco
-  })
+    // Timeout explícito (mesmo valor dos vizinhos): o caminho faz ~8 roundtrips ao DB
+    // remoto do droplet — o default de 5s do vitest flakeia por latência de rede pura
+    // (visto em 2026-08-23, falhando idêntico com e sem as mudanças da T8).
+  }, 20000)
 })
 
 describe('falha do provider — nunca silenciosa (carry-over T7 / DLQ do send)', () => {

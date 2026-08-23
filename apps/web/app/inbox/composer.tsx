@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input"
 // Composer (Task 7, spec §7): envia via POST /messages com clientMessageId gerado por
 // crypto.randomUUID() (Task 4 — chave de idempotência do envio). Só entra na lista local
 // como otimista `queued` DEPOIS do POST confirmar (202) — nunca mostra uma mensagem que a
-// API não aceitou (estados honestos). O próximo poll/refresh de ConversationView substitui
-// esse item pela linha real assim que a API responder.
+// API não aceitou (estados honestos). O item otimista usa o messageId REAL devolvido pelo
+// 202 (não o clientMessageId): é o id da linha no banco, então o dedupe por id do
+// ConversationView (Task 8) reconhece quando o refetch via realtime já trouxe essa mensagem
+// e o refetch seguinte a substitui pelo estado real sem duplicar bolha.
 export function Composer({
   accessToken,
   conversationId,
@@ -35,9 +37,9 @@ export function Composer({
     const clientMessageId = crypto.randomUUID()
 
     try {
-      await sendMessage(accessToken, { conversationId, clientMessageId, text: trimmed })
+      const { messageId } = await sendMessage(accessToken, { conversationId, clientMessageId, text: trimmed })
       onQueued({
-        id: clientMessageId,
+        id: messageId,
         direction: "outbound",
         state: "queued",
         type: "text",

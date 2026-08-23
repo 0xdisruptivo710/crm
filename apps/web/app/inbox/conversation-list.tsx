@@ -9,16 +9,21 @@ import { displayName, formatTime } from "./format"
 
 type Status = "loading" | "error" | "ready"
 
-// Lista de conversas (Task 7, spec §7): nome ?? telefone + hora da última mensagem. Sem
-// realtime ainda (T8 substitui) — carrega uma vez e oferece um botão de atualizar manual.
+// Lista de conversas (Task 7, spec §7): nome ?? telefone + hora da última mensagem.
+// Realtime (Task 8): `refreshVersion` é incrementado pela página quando o Supabase
+// Realtime sinaliza mudança em conversations/messages — cada incremento refaz o fetch
+// (o load mantém status "ready" durante o refetch, então a lista atualiza sem piscar).
+// O botão de atualizar manual permanece como escape hatch.
 export function ConversationList({
   accessToken,
   selectedId,
   onSelect,
+  refreshVersion,
 }: {
   accessToken: string | null
   selectedId: string | null
   onSelect: (conversation: ConversationSummary) => void
+  refreshVersion: number
 }) {
   const [status, setStatus] = useState<Status>("loading")
   const [conversations, setConversations] = useState<ConversationSummary[]>([])
@@ -40,7 +45,7 @@ export function ConversationList({
 
   useEffect(() => {
     load()
-  }, [load])
+  }, [load, refreshVersion])
 
   return (
     <div className="flex h-full w-full max-w-sm shrink-0 flex-col border-r border-border">
