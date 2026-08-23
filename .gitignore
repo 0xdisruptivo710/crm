@@ -18,3 +18,4 @@ desktop.ini
 
 # Workspace do processo SDD (scratch)
 .superpowers/
+.gstack/
