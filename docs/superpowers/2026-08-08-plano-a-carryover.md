@@ -43,12 +43,17 @@ Todos os itens abaixo foram consumidos pelo Plano B (Tasks 1-12) e fechados pela
 - Database.md: registrar exceção de convenção — types de enum Postgres em PascalCase (renomear exigiria migração sem ganho funcional).
 - Polimentos de type deferidos: `Resolved<T>` no `runWithTenant`, `Omit` das operações proibidas no tipo do client, typing do `isThenable`.
 
-**Plano D intake (achados da revisão final do Plano B, 2026-08-10):**
+**PIVÔ 2026-08-23 (ADR-0008/0009/0010, docs/adr/): a Z-API saiu do roadmap — o segundo provider é a UAZAPI, junto com a entidade Channel no núcleo; Zernio (API oficial) vira Fatia 9. Todo item abaixo que citava Z-API foi re-alvo para UAZAPI.**
 
-- Vocabulário da `contract-suite` (`packages/providers/test/contract-suite.ts`) — hoje nomeada/comentada em termos da Evolution; alinhar a nomenclatura antes do `ZApiProvider` herdar a mesma suíte (critério da Fatia 4).
-- `zapi` short-circuit em `provider-factory.ts` (`throw new Error('ZApiProvider: Plano D')`) — remover quando o provider real existir.
+**Plano D intake (achados da revisão final do Plano B, 2026-08-10; re-alvo em 2026-08-23):**
+
+- Vocabulário da `contract-suite` (`packages/providers/test/contract-suite.ts`) — hoje nomeada/comentada em termos da Evolution; alinhar a nomenclatura antes do `UazapiProvider` herdar a mesma suíte (critério da Fatia 4).
+- `zapi` short-circuit em `provider-factory.ts` (`throw new Error('ZApiProvider: Plano D')`) — substituir pelo `UazapiProvider` real quando ele existir; junto, migração do enum `provider` no Prisma (`zapi` → `uazapi`, nenhuma linha usa o valor antigo) — ADR-0008.
 - `failReason` nos contracts compartilhados (`packages/contracts`) — hoje é só uma coluna do banco (`Message.failReason`); formalizar no schema Zod para consumo pela UI/analytics.
-- Verificar se a Z-API emite evento de edição de mensagem — achado da Task 7/8: a Evolution 2.3.7 NÃO emite (2 tentativas controladas); condição de partida diferente para a suíte de contrato do Plano D.
+- Verificar se a UAZAPI emite evento de edição de mensagem — achado da Task 7/8: a Evolution 2.3.7 NÃO emite (2 tentativas controladas); condição de partida possivelmente diferente para a suíte de contrato.
+- UAZAPI marca `wasSentByApi` no webhook do próprio envio — sinal explícito a mais para a guarda de eco do pipeline (hoje calibrada só para a Evolution); cobrir na suíte de contrato (ADR-0008).
+- Entidade `Channel` (ADR-0009) entra na Fatia 4 junto com o segundo provider: migração + backfill (Conversation existente → canal Evolution default por Company); config de provider por tenant migra para a linha do canal; roteamento de webhook resolve canal, não "o provider do tenant"; `ConnectionStatusChange` passa a referenciar canal.
+- Referência de estrutura da UAZAPI (endpoints, shape de webhook, anti-loop): código do Mega CRM local (`_shared/uazapi.ts`, `uazapi-webhook/index.ts`) — referência, NUNCA fixture; fixtures capturadas ao vivo da nossa instância.
 
 ## Runbook de deploy (pós-merge)
 

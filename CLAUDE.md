@@ -108,14 +108,16 @@ apps/web            → Next.js (Vercel)
 apps/api            → Fastify + workers BullMQ (EasyPanel, 1 processo)
 packages/contracts  → schemas Zod compartilhados (tipos de API, eventos, webhooks normalizados)
 packages/db         → schema Prisma + client extension de tenancy + repositories
-packages/providers  → EvolutionProvider, ZApiProvider, camada de normalização
+packages/providers  → EvolutionProvider, UazapiProvider (futuro: ZernioProvider — ADR-0010), camada de normalização
 docs/               → Vision, Architecture, Domain, Database, Conventions, Roadmap
 docs/adr/           → uma decisão por arquivo, 1 página (problema → decisão → consequências)
-tests/providers/fixtures/{evolution,zapi}/ → payloads reais de webhook
+tests/providers/fixtures/{evolution,uazapi}/ → payloads reais de webhook
 
 Proibido: microsserviços, NestJS, servidor WebSocket próprio (v1), segundo deployable de backend.
 
 3. Decisões de arquitetura JÁ TOMADAS — não rediscutir, apenas registrar em ADR
+
+Revisão 2026-08-23 (pivô aprovado após estudo do Mega CRM/Agentise): ADR-0008 (UAZAPI substitui Z-API), ADR-0009 (Channel no núcleo) e ADR-0010 (Zernio/API oficial) já escritas em docs/adr/ — as seções 3.2 e 3.8 abaixo já as refletem.
 
 3.1 Multi-tenant: Application Tenancy (ADR-0001)
 
@@ -143,23 +145,23 @@ A service_role key do Supabase jamais chega ao frontend.
 
 
 
-Um único contrato interno: MessagingProvider. Implementações: EvolutionProvider e ZApiProvider.
+Um único contrato interno: MessagingProvider. Implementações: EvolutionProvider e UazapiProvider (ADR-0008 — a Z-API saiu do roadmap sem código escrito). ZernioProvider (API oficial Meta via relay) entra na Fatia 9 com extensão de contrato — capacidades por provider, janela de 24h, templates (ADR-0010).
 
 
 
-Cada tenant usa exatamente um provider ativo. Nunca dois simultâneos. Nunca fallback automático (semânticas diferentes quebrariam conversas no meio).
+Cada Conversation vive em exatamente um Channel, e cada Channel tem exatamente um provider (ADR-0009). Uma Company pode ter N canais, inclusive de providers diferentes. Nunca dois providers na mesma conversa. Nunca fallback automático entre canais (semânticas diferentes quebrariam conversas no meio).
 
 
 
-Nenhum módulo de negócio conhece Evolution ou Z-API. Chamada direta às APIs deles fora de packages/providers é violação de arquitetura.
+Nenhum módulo de negócio conhece Evolution, UAZAPI ou Zernio. Chamada direta às APIs deles fora de packages/providers é violação de arquitetura.
 
 
 
-Não existe WTSProvider e não existirá. Só Evolution e Z-API.
+Só existem os providers registrados por ADR: hoje Evolution e UAZAPI, com Zernio previsto pela ADR-0010. Provider novo (inclusive a volta da Z-API) exige nova ADR.
 
 3.3 Webhooks: união normalizada, não um tipo só (ADR-0003)
 
-Endpoints por provider (/webhooks/evolution, /webhooks/zapi) convertem imediatamente para três tipos internos:
+Endpoints por provider (/webhooks/evolution, /webhooks/uazapi) convertem imediatamente para três tipos internos:
 
 
 
@@ -265,7 +267,7 @@ WebSocket próprio apenas se surgir motivo técnico real — e exige nova ADR.
 
 
 
-Núcleo de identidade (estável, nunca muda de responsabilidade): Company, Customer, Conversation, Message, TimelineEvent.
+Núcleo de identidade (estável, nunca muda de responsabilidade): Company, Channel (ADR-0009 — entra na Fatia 4 com backfill do canal Evolution default), Customer, Conversation, Message, TimelineEvent.
 
 
 
@@ -297,7 +299,7 @@ Customer é resolvido/criado na chegada de qualquer mensagem — a decisão vale
 
 
 
-tests/providers/fixtures/{evolution,zapi}/ com payloads reais sanitizados.
+tests/providers/fixtures/{evolution,uazapi}/ com payloads reais sanitizados.
 
 
 
@@ -365,7 +367,7 @@ Código, comentários e documentação em português; identificadores em inglês
 
 
 
-ESLint: proibir any; proibir import do Prisma client fora de packages/db; proibir import/fetch de hosts Evolution/Z-API fora de packages/providers.
+ESLint: proibir any; proibir import do Prisma client fora de packages/db; proibir import/fetch de hosts Evolution/UAZAPI/Zernio fora de packages/providers.
 
 
 
@@ -461,7 +463,7 @@ Kanban integrado ao Atendimento (Card referencia Customer/Conversation)
 
 
 
-Z-API como segundo provider
+Channel no núcleo (migração + backfill) + UAZAPI como segundo provider (ADR-0008/0009)
 
 
 
@@ -489,7 +491,7 @@ Agenda
 
 
 
-Follow-up
+Follow-up + automações de funil (gatilhos por etapa do Kanban)
 
 
 
@@ -517,13 +519,35 @@ Campanhas
 
 
 
-Relatórios
+Relatórios (+ Meta Ads via Zernio como fonte de atribuição/custo — não é mensageria, ADR-0010)
+
+
+
+
+
+9
+
+
+
+Zernio — API oficial Meta: extensão do contrato MessagingProvider (janela 24h + templates) + canal Instagram (ADR-0010)
+
+
+
+
+
+10
+
+
+
+Agente IA + handoff IA↔humano (posição negociável conforme prioridade do negócio)
 
 
 
 
 
 Fatias 0+1 juntas têm teto de ~2 semanas. Se estourar, a fundação está grande demais — cortar fundação, não esticar prazo. Nenhuma fatia N+1 começa com a N sem critério de pronto batido.
+
+Blueprint de domínio para as Fatias 3/6/7/8: o schema do Mega CRM/Agentise (referência local do usuário, fora deste repo — nunca commitar) — deals/stages/pipelines, funnel_automations, campaign_contacts, follow_up_rules v2, métricas. Traduzir para o nosso núcleo e eventos; NUNCA copiar a arquitetura dele (RLS como tenancy, pg_cron como fila, triggers HTTP). Payloads Zernio de lá estão marcados "ASSUMIDO" — não usar como fixture.
 
 7. Primeira Missão (execute nesta ordem ao encontrar este arquivo num repo vazio)
 
@@ -539,7 +563,7 @@ Gerar docs/ a partir da seção 3: Vision.md, Architecture.md, Domain.md, Databa
 
 
 
-Escrever as 7 ADRs (docs/adr/0001 a 0007): tenancy, provider, webhook-contract, event-model/timeline, realtime, message-state, core-entities. Uma página cada: problema → decisão → consequências.
+Escrever as 7 ADRs (docs/adr/0001 a 0007): tenancy, provider, webhook-contract, event-model/timeline, realtime, message-state, core-entities. Uma página cada: problema → decisão → consequências. As ADRs 0008–0010 (pivô de 2026-08-23) já existem — 0002 e 0007 devem nascer coerentes com elas.
 
 
 
