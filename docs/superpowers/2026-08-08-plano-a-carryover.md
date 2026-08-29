@@ -75,3 +75,10 @@ Toda costura entre tasks (auth→tenant, rota→fila, webhook→pipeline) ganha 
 - Produção do usuário (projeto `aios` no EasyPanel: Evolution + n8n) roda no MESMO droplet da infra de dev — intocável; nunca buildar imagens no droplet (CI builda, EasyPanel puxa).
 - Rotacionar credenciais da stack `dinastia` que circularam em conversa (Postgres, Redis, chave n8n, API key Evolution).
 - Testes que fazem wipe têm `assertSafeToWipe` (recusa hosts supabase.co e db fora de aios-pocket/aios_pocket); wipe do tenancy.test destrói o seed do piloto a cada run — re-rodar `db:seed` quando necessário.
+
+## Intake pós-E2E da Fatia 1 (T10, 2026-08-28) — para os Planos D+
+
+- **Latência realtime insert→tela ~1,5–2,2s em produção** (debounce 300ms + refetch completo): otimizar com fast-path — mapear o payload do INSERT direto para a conversa aberta (dedupe por id já existe) e manter o refetch como reconciliação; reavaliar o debounce.
+- **Watchdog de morte silenciosa da instância**: `Company.connectionState` só muda por webhook — Evolution com processo morto congela em `connected` e o banner nunca acende ("instância morta em silêncio é o pior modo de falha", Domain.md). Falta healthcheck ativo (poll de `/instance/connectionState` pela API ou cron) que marque `disconnected` na ausência de resposta.
+- **Rotação de credenciais (bloco 2026-08-28)**: env completa do serviço `api` circulou em conversa (DATABASE_URL/Supabase, REDIS_URL dev, APP_ENCRYPTION_KEY, EVOLUTION_DEV_API_KEY). Rotacionar após o merge; APP_ENCRYPTION_KEY exige re-cifrar `providerCredentials` das Companies (escrever script). Também pendentes: senhas em claro no histórico WhatsApp do piloto (11/08) e stack `dinastia`.
+- Nota operacional: `POST /instance/restart` da Evolution NÃO derruba a sessão (sem `connection.update`); teste real do banner = logout pelo celular + QR novo. Manager UI trava com deep link `instance/undefined` — entrar pela raiz `/manager`.
