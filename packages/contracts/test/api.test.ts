@@ -116,6 +116,7 @@ describe('messageViewSchema (resposta de GET /conversations/:id/messages)', () =
       mediaMimeType: null,
       fromMe: false,
       providerMessageId: 'FAKE123',
+      failReason: null,
       createdAt: '2026-08-11T10:00:00.000Z',
     })
     expect(ok.direction).toBe('outbound')
@@ -133,9 +134,44 @@ describe('messageViewSchema (resposta de GET /conversations/:id/messages)', () =
       mediaMimeType: null,
       fromMe: false,
       providerMessageId: null,
+      failReason: null,
       createdAt: '2026-08-11T10:00:00.000Z',
     })
     expect(ok.text).toBeNull()
+  })
+
+  it('failed carrega failReason para a UI (tooltip da cicatriz — ADR-0006: falha nunca silenciosa)', () => {
+    const ok = messageViewSchema.parse({
+      id: UUID,
+      direction: 'outbound',
+      state: 'failed',
+      type: 'text',
+      text: 'não foi',
+      mediaUrl: null,
+      mediaMimeType: null,
+      fromMe: false,
+      providerMessageId: null,
+      failReason: 'evolution indisponível (simulado)',
+      createdAt: '2026-08-11T10:00:00.000Z',
+    })
+    expect(ok.failReason).toBe('evolution indisponível (simulado)')
+  })
+
+  it('failReason é null em mensagem sem falha', () => {
+    const ok = messageViewSchema.parse({
+      id: UUID,
+      direction: 'inbound',
+      state: 'received',
+      type: 'text',
+      text: 'oi',
+      mediaUrl: null,
+      mediaMimeType: null,
+      fromMe: false,
+      providerMessageId: null,
+      failReason: null,
+      createdAt: '2026-08-11T10:00:00.000Z',
+    })
+    expect(ok.failReason).toBeNull()
   })
 
   it('rejeita direction fora do enum inbound/outbound', () => {

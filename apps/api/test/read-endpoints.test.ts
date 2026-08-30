@@ -226,6 +226,10 @@ describe('GET /conversations/:id/messages (rota autenticada)', () => {
     expect(middle?.type).toBe('text')
     expect(middle?.text).toBe('mensagem do meio')
     expect(middle?.fromMe).toBe(false)
+    // failReason atravessa a rota (Plano D, T11 — carry-over): null quando não há falha.
+    // A forma com motivo preenchido é coberta pelos casos do messageViewSchema em
+    // packages/contracts/test/api.test.ts.
+    expect(middle?.failReason).toBeNull()
   })
 
   it('limite: ?limit=2 devolve as 2 mensagens mais antigas (createdAt asc)', async () => {

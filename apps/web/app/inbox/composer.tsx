@@ -50,6 +50,7 @@ export function Composer({
         // conversation-view.tsx (indicador "você — Aios Pocket" vs "você — celular").
         fromMe: false,
         providerMessageId: null,
+        failReason: null,
         createdAt: new Date(),
       })
       setText("")

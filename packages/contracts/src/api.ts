@@ -52,6 +52,9 @@ export const messageViewSchema = z.object({
   mediaMimeType: z.string().nullable(),
   fromMe: z.boolean(),
   providerMessageId: z.string().nullable(),
+  // Motivo da falha para a UI (tooltip da cicatriz ✗ — ADR-0006: falha nunca silenciosa).
+  // null em toda mensagem que não está em `failed` (carry-over do Plano B, entregue no D).
+  failReason: z.string().nullable(),
   createdAt: z.coerce.date(),
 })
 

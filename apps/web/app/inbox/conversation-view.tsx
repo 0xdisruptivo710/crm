@@ -150,11 +150,10 @@ function MessageBubble({ message }: { message: MessageView }) {
 
 function MessageStateIcon({ message }: { message: MessageView }) {
   if (message.state === "failed") {
-    // O contrato de GET /conversations/:id/messages (Task 5) não expõe failReason — só o
-    // estado. Tooltip com o motivo específico fica pendente de uma mudança de contrato
-    // fora do escopo de arquivos desta task (fica registrado no relatório).
+    // Tooltip com o motivo real da falha (failReason no contrato — Plano D, T11);
+    // fallback genérico quando a falha não gravou motivo.
     return (
-      <span title="Falha no envio" className="text-destructive">
+      <span title={message.failReason ?? "Falha no envio"} className="text-destructive">
         ✗
       </span>
     )

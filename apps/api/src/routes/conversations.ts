@@ -65,6 +65,7 @@ export function registerConversationRoutes(app: FastifyInstance): void {
       mediaMimeType: message.mediaMimeType,
       fromMe: message.fromMe,
       providerMessageId: message.providerMessageId,
+      failReason: message.failReason,
       createdAt: message.createdAt,
     }))
   })
