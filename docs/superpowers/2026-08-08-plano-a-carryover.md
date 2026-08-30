@@ -37,19 +37,19 @@ Todos os itens abaixo foram consumidos pelo Plano B (Tasks 1-12) e fechados pela
 - `sendMedia` — primeira execução REAL ainda pendente contra a Evolution de verdade (endpoint e `fileName` do envio de áudio não confirmados em produção; só `sendText` foi provado ponta-a-ponta).
 - Naming de `MessageReceived` para eventos `fromMe` — o nome sugere "recebido do cliente", mas hoje também é publicado quando o humano responde pelo próprio celular (fromMe); revisar nomenclatura do evento de domínio antes do Plano C consumir.
 
-## Plano D (docs/ADRs)
+## Plano D (docs/ADRs) — EXECUTADO 2026-08-28/29 (branch plano-d-docs-adrs)
 
-- ADR-0001: documentar juntos os limites compostos da tenancy — validação FK cross-tenant ausente, nested writes/`connect` não interceptados, `Company` não-exempt (ilegível pelo client tenantizado por design).
-- Database.md: registrar exceção de convenção — types de enum Postgres em PascalCase (renomear exigiria migração sem ganho funcional).
-- Polimentos de type deferidos: `Resolved<T>` no `runWithTenant`, `Omit` das operações proibidas no tipo do client, typing do `isThenable`.
+- **[RESOLVIDO]** ADR-0001: limites compostos da tenancy documentados — `docs/adr/0001-application-tenancy.md` + `docs/Database.md` §tenancy.
+- **[RESOLVIDO]** Exceção de convenção dos enums PascalCase registrada — `docs/Database.md` §convenções.
+- **[RESOLVIDO]** Polimentos de type (T10): `Resolved<T>` no `runWithTenant`, guard `PromiseLike` no `isThenable`, `TenantSafe` (Omit espelhando EXATAMENTE os bloqueios de runtime, com isenção de `rawWebhookEvent`) no tipo do client; testes de guard de runtime preservados via `@ts-expect-error`.
 
 **PIVÔ 2026-08-23 (ADR-0008/0009/0010, docs/adr/): a Z-API saiu do roadmap — o segundo provider é a UAZAPI, junto com a entidade Channel no núcleo; Zernio (API oficial) vira Fatia 9. Todo item abaixo que citava Z-API foi re-alvo para UAZAPI.**
 
 **Plano D intake (achados da revisão final do Plano B, 2026-08-10; re-alvo em 2026-08-23):**
 
-- Vocabulário da `contract-suite` (`packages/providers/test/contract-suite.ts`) — hoje nomeada/comentada em termos da Evolution; alinhar a nomenclatura antes do `UazapiProvider` herdar a mesma suíte (critério da Fatia 4).
+- **[RESOLVIDO no Plano D, T9]** Vocabulário da `contract-suite` — a suíte já era provider-agnóstica por assinatura (`runProviderContractSuite(provider, fixturesDir)`); só o comentário citava Z-API, re-alvo para UAZAPI com os itens a cobrir na Fatia 4 anotados nele.
 - `zapi` short-circuit em `provider-factory.ts` (`throw new Error('ZApiProvider: Plano D')`) — substituir pelo `UazapiProvider` real quando ele existir; junto, migração do enum `provider` no Prisma (`zapi` → `uazapi`, nenhuma linha usa o valor antigo) — ADR-0008.
-- `failReason` nos contracts compartilhados (`packages/contracts`) — hoje é só uma coluna do banco (`Message.failReason`); formalizar no schema Zod para consumo pela UI/analytics.
+- **[RESOLVIDO no Plano D, T11]** `failReason` formalizado no `messageViewSchema` (nullable), atravessando GET /conversations/:id/messages, com tooltip do motivo real na cicatriz ✗ do inbox.
 - Verificar se a UAZAPI emite evento de edição de mensagem — achado da Task 7/8: a Evolution 2.3.7 NÃO emite (2 tentativas controladas); condição de partida possivelmente diferente para a suíte de contrato.
 - UAZAPI marca `wasSentByApi` no webhook do próprio envio — sinal explícito a mais para a guarda de eco do pipeline (hoje calibrada só para a Evolution); cobrir na suíte de contrato (ADR-0008).
 - Entidade `Channel` (ADR-0009) entra na Fatia 4 junto com o segundo provider: migração + backfill (Conversation existente → canal Evolution default por Company); config de provider por tenant migra para a linha do canal; roteamento de webhook resolve canal, não "o provider do tenant"; `ConnectionStatusChange` passa a referenciar canal.
