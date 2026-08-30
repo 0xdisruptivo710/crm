@@ -38,7 +38,10 @@ interface ManifestEntry {
 const IGNORED_KINDS = new Set<ManifestEntry['kind']>(['incoming_reaction', 'incoming_special', 'send_message_echo'])
 
 // Suíte de contrato provider-agnóstica (ADR-0002): a MESMA bateria roda para
-// Evolution (agora) e Z-API (Plano D). Critério da Fatia 4: passar aqui.
+// Evolution (agora) e UAZAPI (Fatia 4 — ADR-0008; a Z-API saiu do roadmap).
+// Critério da Fatia 4: passar aqui, sobre fixtures reais capturadas ao vivo.
+// Itens a cobrir quando a UAZAPI entrar (carry-over): sinal wasSentByApi na guarda
+// de eco; verificar se ela emite evento de edição (a Evolution 2.3.7 não emite).
 export function runProviderContractSuite(provider: MessagingProvider, fixturesDir: string): void {
   const manifest = JSON.parse(readFileSync(join(fixturesDir, 'manifest.json'), 'utf8')) as ManifestEntry[]
 
