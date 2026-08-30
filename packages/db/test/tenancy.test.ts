@@ -95,6 +95,9 @@ describe('tenancy por aplicação (ADR-0001)', () => {
   it('proíbe operações que não aceitam filtro de tenant', async () => {
     await expect(
       runWithTenant({ companyId: companyA }, () =>
+        // @ts-expect-error — o polimento de tipo (TenantSafe em client.ts) agora também
+        // proíbe findUnique em compile-time; este teste continua provando o guard de
+        // RUNTIME (a extension lança), que é a defesa de verdade.
         prisma.customer.findUnique({ where: { id: companyA } }),
       ),
     ).rejects.toThrow('proibida')
@@ -102,11 +105,14 @@ describe('tenancy por aplicação (ADR-0001)', () => {
 
   it('proíbe operações raw, mesmo com TenantContext ativo', async () => {
     await expect(
+      // @ts-expect-error — TenantSafe (client.ts) remove $queryRaw do tipo; o teste segue
+      // provando o guard de RUNTIME da extension (o throw), que é a defesa de verdade.
       runWithTenant({ companyId: companyA }, () => prisma.$queryRaw`SELECT 1`),
     ).rejects.toThrow('raw')
   })
 
   it('proíbe operações raw também sem TenantContext', async () => {
+    // @ts-expect-error — idem: tipo bloqueia, runtime continua provado.
     await expect(prisma.$queryRaw`SELECT 1`).rejects.toThrow('raw')
   })
 })
